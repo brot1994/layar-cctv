@@ -292,13 +292,20 @@ public class MainActivity extends Activity {
             wv.setBackgroundColor(Color.BLACK);
             final String stretchJs = !p.stretch ? "" :
                 "(function(){if(window.__agiStretch)return;window.__agiStretch=1;"
-              + "function f(){try{var H=document.documentElement.clientHeight,best=null,ba=0;"
+              + "var busy=false;"
+              + "function f(){if(busy)return;busy=true;try{var H=document.documentElement.clientHeight,best=null,ba=0;"
               + "var ts=document.getElementsByTagName('table');"
               + "for(var i=0;i<ts.length;i++){var r=ts[i].getBoundingClientRect();var a=r.width*r.height;"
               + "if(a>ba){ba=a;best=ts[i];}}"
-              + "if(!best)return;var r=best.getBoundingClientRect();var top=r.top+window.pageYOffset;"
-              + "var want=H-top-2;if(want>r.height+4){best.style.height=want+'px';}}catch(e){}}"
-              + "f();setInterval(f,2000);})();";
+              + "if(best){var r=best.getBoundingClientRect();var top=r.top+window.pageYOffset;"
+              + "var want=H-top-2;"
+              + "if(want>r.height+4||(best.__agiH&&Math.abs(r.height-best.__agiH)>3&&want>0)){"
+              + "best.style.setProperty('height',want+'px','important');best.__agiH=want;}}"
+              + "}catch(e){}busy=false;}"
+              + "f();setInterval(f,250);"
+              + "try{new MutationObserver(function(){setTimeout(f,0);}).observe(document.documentElement,"
+              + "{childList:true,subtree:true,attributes:true,attributeFilter:['style','class']});}catch(e){}"
+              + "window.addEventListener('resize',f);})();";
             final String vpJs0;
             if (p.viewWidth > 0) {
                 android.util.DisplayMetrics dm = getResources().getDisplayMetrics();

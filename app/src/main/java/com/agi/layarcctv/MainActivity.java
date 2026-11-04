@@ -288,8 +288,22 @@ public class MainActivity extends Activity {
             s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
             s.setUseWideViewPort(true);
             s.setLoadWithOverviewMode(true);
+            s.setTextZoom(100);
             wv.setBackgroundColor(Color.BLACK);
-            if (p.zoom > 0) wv.setInitialScale(p.zoom);
+            final String vpJs;
+            if (p.viewWidth > 0) {
+                android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+                double cssW = dm.widthPixels / (double) dm.density;
+                double sc = cssW / p.viewWidth * (p.zoom > 0 ? p.zoom / 100.0 : 1.0);
+                String sv = String.format(java.util.Locale.US, "%.4f", sc);
+                vpJs = "(function(){var m=document.querySelector('meta[name=viewport]');"
+                     + "if(!m){m=document.createElement('meta');m.name='viewport';(document.head||document.documentElement).appendChild(m);}"
+                     + "m.content='width=" + p.viewWidth + ", initial-scale=" + sv + ", minimum-scale=" + sv
+                     + ", maximum-scale=" + sv + ", user-scalable=no';})();";
+            } else {
+                vpJs = null;
+                if (p.zoom > 0) wv.setInitialScale(p.zoom);
+            }
 
             wv.setWebViewClient(new WebViewClient() {
                 @Override
@@ -309,7 +323,13 @@ public class MainActivity extends Activity {
                 }
 
                 @Override
+                public void onPageCommitVisible(WebView v, String url) {
+                    if (vpJs != null) v.evaluateJavascript(vpJs, null);
+                }
+
+                @Override
                 public void onPageFinished(WebView v, String url) {
+                    if (vpJs != null) v.evaluateJavascript(vpJs, null);
                     if (webError != null) {
                         root.removeView(webError);
                         webError = null;

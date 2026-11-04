@@ -138,6 +138,8 @@ function pageCard(p, i) {
     h += '<div class="row"><div>' + field('Lebar tampilan (px)', 'viewWidth', p.viewWidth === undefined ? 1920 : p.viewWidth, 'number') + '</div>' +
          '<div>' + field('Zoom % tambahan (0 = pas layar)', 'zoom', p.zoom || 0, 'number') + '</div></div>';
     h += '<small>Lebar tampilan 1920 = seperti monitor Full HD di PC. Kalau halaman masih terpotong/terlalu kecil, ubah (mis. 1850). 0 = otomatis bawaan TV.</small>';
+    h += '<label class="ck"><input type="checkbox" data-k="stretch" ' + (p.stretch === false ? '' : 'checked') +
+         '> Regangkan tabel ke bawah sampai penuh layar (ukuran tulisan tetap)</label>';
     h += '<div class="row"><div>' + field('Refresh tiap (menit, 0 = tidak)', 'refreshMin', p.refreshMin || 0, 'number') + '</div></div>';
     h += '<label class="ck"><input type="checkbox" data-k="ignoreSsl" ' + (p.ignoreSsl ? 'checked' : '') +
          '> Abaikan error sertifikat (untuk https internal)</label>';
@@ -235,7 +237,7 @@ function addPage(type) {
   sync();
   if (type === 'web') {
     CFG.pages.push({type:'web', name:'', duration:60, enabled:true, from:'', to:'',
-                    url:'', viewWidth:1920, zoom:0, refreshMin:0, ignoreSsl:false});
+                    url:'', viewWidth:1920, stretch:true, zoom:0, refreshMin:0, ignoreSsl:false});
   } else {
     CFG.pages.push({type:'cctv', name:'CCTV', duration:60, enabled:true, from:'', to:'',
                     layout:'1+5', cameras:[]});

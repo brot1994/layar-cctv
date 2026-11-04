@@ -22,6 +22,7 @@ public class Page {
     // khusus web
     public String url = "";
     public int zoom = 0;            // persen tambahan, 0 = pas layar
+    public boolean stretch = true;  // regangkan tabel terbesar ke bawah sampai penuh layar
     public int viewWidth = 1920;    // lebar layout halaman (px), 0 = otomatis bawaan WebView
     public int refreshMin = 0;      // 0 = tidak refresh otomatis
     public boolean ignoreSsl = false;
@@ -48,6 +49,7 @@ public class Page {
         p.url = o.optString("url", "");
         p.zoom = o.optInt("zoom", 0);
         p.viewWidth = o.optInt("viewWidth", 1920);
+        p.stretch = o.optBoolean("stretch", true);
         p.refreshMin = o.optInt("refreshMin", 0);
         p.ignoreSsl = o.optBoolean("ignoreSsl", false);
         p.layout = o.optString("layout", "1+5");
@@ -74,6 +76,7 @@ public class Page {
                 o.put("url", url);
                 o.put("zoom", zoom);
                 o.put("viewWidth", viewWidth);
+                o.put("stretch", stretch);
                 o.put("refreshMin", refreshMin);
                 o.put("ignoreSsl", ignoreSsl);
             } else {

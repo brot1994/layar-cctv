@@ -290,20 +290,30 @@ public class MainActivity extends Activity {
             s.setLoadWithOverviewMode(true);
             s.setTextZoom(100);
             wv.setBackgroundColor(Color.BLACK);
-            final String vpJs;
+            final String stretchJs = !p.stretch ? "" :
+                "(function(){if(window.__agiStretch)return;window.__agiStretch=1;"
+              + "function f(){try{var H=document.documentElement.clientHeight,best=null,ba=0;"
+              + "var ts=document.getElementsByTagName('table');"
+              + "for(var i=0;i<ts.length;i++){var r=ts[i].getBoundingClientRect();var a=r.width*r.height;"
+              + "if(a>ba){ba=a;best=ts[i];}}"
+              + "if(!best)return;var r=best.getBoundingClientRect();var top=r.top+window.pageYOffset;"
+              + "var want=H-top-2;if(want>r.height+4){best.style.height=want+'px';}}catch(e){}}"
+              + "f();setInterval(f,2000);})();";
+            final String vpJs0;
             if (p.viewWidth > 0) {
                 android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
                 double cssW = dm.widthPixels / (double) dm.density;
                 double sc = cssW / p.viewWidth * (p.zoom > 0 ? p.zoom / 100.0 : 1.0);
                 String sv = String.format(java.util.Locale.US, "%.4f", sc);
-                vpJs = "(function(){var m=document.querySelector('meta[name=viewport]');"
+                vpJs0 = "(function(){var m=document.querySelector('meta[name=viewport]');"
                      + "if(!m){m=document.createElement('meta');m.name='viewport';(document.head||document.documentElement).appendChild(m);}"
                      + "m.content='width=" + p.viewWidth + ", initial-scale=" + sv + ", minimum-scale=" + sv
                      + ", maximum-scale=" + sv + ", user-scalable=no';})();";
             } else {
-                vpJs = null;
+                vpJs0 = "";
                 if (p.zoom > 0) wv.setInitialScale(p.zoom);
             }
+            final String vpJs = vpJs0 + stretchJs;
 
             wv.setWebViewClient(new WebViewClient() {
                 @Override
@@ -324,12 +334,12 @@ public class MainActivity extends Activity {
 
                 @Override
                 public void onPageCommitVisible(WebView v, String url) {
-                    if (vpJs != null) v.evaluateJavascript(vpJs, null);
+                    if (!vpJs.isEmpty()) v.evaluateJavascript(vpJs, null);
                 }
 
                 @Override
                 public void onPageFinished(WebView v, String url) {
-                    if (vpJs != null) v.evaluateJavascript(vpJs, null);
+                    if (!vpJs.isEmpty()) v.evaluateJavascript(vpJs, null);
                     if (webError != null) {
                         root.removeView(webError);
                         webError = null;

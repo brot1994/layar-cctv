@@ -48,6 +48,7 @@ public class MainActivity extends Activity {
     private volatile boolean paused = false;
     private boolean screenShowing = false;
     private boolean hintDone = false;
+    private boolean stopped = false; // true saat aplikasi di latar belakang (Home/screensaver/TV tidur)
     private final Runnable rotateTask = this::next;
 
     // ---- halaman web ----
@@ -120,6 +121,7 @@ public class MainActivity extends Activity {
         paused = false;
         screenShowing = false;
         hintDone = false;
+        if (stopped) return; // di latar belakang: tampil nanti saat aplikasi dibuka lagi
         advance(1);
     }
 
@@ -128,6 +130,7 @@ public class MainActivity extends Activity {
     /** Pindah ke halaman aktif berikutnya (dir = 1) atau sebelumnya (dir = -1). */
     private void advance(int dir) {
         ui.removeCallbacks(rotateTask);
+        if (stopped) return;
         int n = pages.size();
         if (n == 0) {
             clearScreen();
@@ -175,6 +178,7 @@ public class MainActivity extends Activity {
     }
 
     private void doControl(String cmd, int idx) {
+        if (stopped) return;
         switch (cmd) {
             case "next":
                 advance(1);
@@ -573,6 +577,25 @@ public class MainActivity extends Activity {
             }
         } catch (Exception ignored) {}
         return "0.0.0.0";
+    }
+
+    /** Aplikasi tidak terlihat (Home, screensaver, TV tidur): hentikan semua stream & halaman web. */
+    @Override
+    protected void onStop() {
+        stopped = true;
+        ui.removeCallbacks(rotateTask);
+        clearScreen();
+        super.onStop();
+    }
+
+    /** Aplikasi terlihat lagi: mulai rotasi dari awal. */
+    @Override
+    protected void onStart() {
+        super.onStart();
+        if (stopped) {
+            stopped = false;
+            startRotation();
+        }
     }
 
     @Override

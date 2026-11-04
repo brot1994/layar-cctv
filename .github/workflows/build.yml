@@ -24,12 +24,12 @@ jobs:
           ls "$ANDROID_HOME/platforms" || true
           ls "$ANDROID_HOME/build-tools" || true
 
-      - name: Generate Gradle wrapper 8.2 (di folder kosong, lalu salin ke project)
+      - name: Generate Gradle wrapper 8.11.1 (di folder kosong, lalu salin ke project)
         run: |
           mkdir -p "$RUNNER_TEMP/wrap"
           cd "$RUNNER_TEMP/wrap"
           touch settings.gradle
-          gradle wrapper --gradle-version 8.2
+          gradle wrapper --gradle-version 8.11.1
           cp -r gradle gradlew gradlew.bat "$GITHUB_WORKSPACE/"
           chmod +x "$GITHUB_WORKSPACE/gradlew"
 

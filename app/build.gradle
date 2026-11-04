@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace 'com.agi.layarcctv'
-    compileSdk 34
+    compileSdk 36
 
     defaultConfig {
         applicationId "com.agi.layarcctv"

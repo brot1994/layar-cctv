@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Setting Layar CCTV</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:-apple-system,Roboto,Arial,sans-serif;margin:0;background:#0f1115;color:#e7e9ee;padding:14px;font-size:15px}
+h1{font-size:18px;margin:4px 0 14px}
+h2{font-size:14px;color:#9aa4b2;margin:18px 0 8px}
+.card{background:#1a1d24;border:1px solid #2a2f3a;border-radius:10px;padding:12px;margin-bottom:12px}
+label{display:block;font-size:12px;color:#9aa4b2;margin:8px 0 3px}
+input,select{width:100%;padding:9px;border-radius:7px;border:1px solid #333a47;background:#11141a;color:#e7e9ee;font-size:15px}
+.row{display:flex;gap:8px}.row>div{flex:1}
+.cam{background:#161a21;border:1px solid #2a2f3a;border-radius:9px;padding:10px;margin-bottom:10px}
+.cam .hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.cam .hd b{font-size:14px}
+.big{color:#ffc107}
+button{border:0;border-radius:7px;padding:9px 12px;font-size:14px;color:#fff;background:#2b3240}
+button.pri{background:#2563eb}
+button.del{background:#7f1d1d}
+button.mv{background:#374151;padding:7px 10px}
+.tools{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.bar{position:sticky;bottom:0;background:#0f1115;padding:12px 0}
+.bar button{width:100%;padding:14px;font-size:16px}
+#msg{padding:9px;border-radius:7px;margin-bottom:10px;display:none}
+.ok{background:#065f46}.err{background:#7f1d1d}
+small{color:#6b7280}
+</style>
+</head>
+<body>
+<h1>Setting Layar CCTV</h1>
+<div id="msg"></div>
+
+<div class="card">
+  <label>Layout</label>
+  <select id="layout">
+    <option value="1+5">1 besar + 5 kecil</option>
+    <option value="1+3">1 besar + 3 kecil</option>
+    <option value="2x2">2 x 2 (4 sama besar)</option>
+  </select>
+  <div class="row">
+    <div><label>User default</label><input id="du" placeholder="admin"></div>
+    <div><label>Password default (DVR)</label><input id="dp" placeholder="password DVR"></div>
+  </div>
+  <label>Buffer (ms) &mdash; besarkan bila patah-patah</label>
+  <input id="nc" type="number" value="600">
+  <small>Kamera #1 selalu jadi kotak besar. Password di kamera menimpa password default.</small>
+</div>
+
+<h2>Daftar Kamera</h2>
+<div id="cams"></div>
+<button class="pri" style="width:100%;padding:12px" onclick="addCam()">+ Tambah Kamera</button>
+
+<div class="bar">
+  <button class="pri" onclick="save()">SIMPAN &amp; TAMPILKAN</button>
+</div>
+
+<script>
+var CFG = null;
+
+function msg(t, ok) {
+  var m = document.getElementById('msg');
+  m.textContent = t;
+  m.className = ok ? 'ok' : 'err';
+  m.style.display = 'block';
+  setTimeout(function(){ m.style.display = 'none'; }, 4000);
+}
+
+function load() {
+  fetch('/config').then(function(r){ return r.json(); }).then(function(c){
+    CFG = c; render();
+  }).catch(function(e){ msg('Gagal muat config: ' + e, false); });
+}
+
+function render() {
+  document.getElementById('layout').value = CFG.layout || '1+5';
+  document.getElementById('du').value = CFG.defaultUser || '';
+  document.getElementById('dp').value = CFG.defaultPass || '';
+  document.getElementById('nc').value = CFG.networkCaching || 600;
+  var box = document.getElementById('cams');
+  box.innerHTML = '';
+  (CFG.cameras || []).forEach(function(cam, i){ box.appendChild(camCard(cam, i)); });
+}
+
+function esc(s){
+  return (s + '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function camCard(cam, i) {
+  var d = document.createElement('div');
+  d.className = 'cam';
+  var tag = (i === 0) ? '<span class="big">&#9733; KOTAK BESAR</span>' : ('#' + (i + 1));
+  d.innerHTML =
+    '<div class="hd"><b>Kamera ' + (i + 1) + '</b><span>' + tag + '</span></div>' +
+    '<label>Nama</label><input data-k="name" value="' + esc(cam.name || '') + '">' +
+    '<div class="row">' +
+      '<div><label>IP</label><input data-k="ip" value="' + esc(cam.ip || '') + '"></div>' +
+      '<div><label>Port</label><input data-k="port" type="number" value="' + (cam.port || 554) + '"></div>' +
+    '</div>' +
+    '<div class="row">' +
+      '<div><label>Channel (kamera ke-)</label><input data-k="channel" type="number" value="' + (cam.channel || 1) + '"></div>' +
+      '<div><label>Stream</label><select data-k="sub"><option value="false">Main (tajam)</option><option value="true">Sub (ringan)</option></select></div>' +
+    '</div>' +
+    '<div class="row">' +
+      '<div><label>User (kosong=default)</label><input data-k="user" value="' + esc(cam.user || '') + '"></div>' +
+      '<div><label>Password (kosong=default)</label><input data-k="pass" value="' + esc(cam.pass || '') + '"></div>' +
+    '</div>' +
+    '<div class="tools">' +
+      '<button class="mv" onclick="mv(' + i + ',-1)">&#8593; naik</button>' +
+      '<button class="mv" onclick="mv(' + i + ',1)">&#8595; turun</button>' +
+      '<button class="del" onclick="rm(' + i + ')">hapus</button>' +
+    '</div>';
+  d.querySelector('[data-k="sub"]').value = (cam.sub ? 'true' : 'false');
+  return d;
+}
+
+function collect() {
+  var cams = [];
+  document.querySelectorAll('#cams .cam').forEach(function(card){
+    var o = {};
+    card.querySelectorAll('[data-k]').forEach(function(el){
+      var k = el.getAttribute('data-k');
+      var v = el.value;
+      if (k === 'port' || k === 'channel') o[k] = parseInt(v) || (k === 'port' ? 554 : 1);
+      else if (k === 'sub') o[k] = (v === 'true');
+      else o[k] = v;
+    });
+    cams.push(o);
+  });
+  return {
+    layout: document.getElementById('layout').value,
+    defaultUser: document.getElementById('du').value,
+    defaultPass: document.getElementById('dp').value,
+    networkCaching: parseInt(document.getElementById('nc').value) || 600,
+    cameras: cams
+  };
+}
+
+function save() {
+  var c = collect();
+  fetch('/save', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(c)
+  }).then(function(r){ return r.json(); }).then(function(res){
+    if (res.ok) { CFG = c; msg('Tersimpan. Layar TV sedang reload.', true); }
+    else msg('Gagal: ' + (res.error || ''), false);
+  }).catch(function(e){ msg('Gagal konek: ' + e, false); });
+}
+
+function addCam() {
+  CFG = collect();
+  CFG.cameras.push({name:'', ip:'', port:554, channel:1, sub:true, user:'', pass:''});
+  render();
+}
+
+function rm(i) { CFG = collect(); CFG.cameras.splice(i, 1); render(); }
+
+function mv(i, d) {
+  CFG = collect();
+  var j = i + d;
+  if (j < 0 || j >= CFG.cameras.length) return;
+  var t = CFG.cameras[i]; CFG.cameras[i] = CFG.cameras[j]; CFG.cameras[j] = t;
+  render();
+}
+
+load();
+</script>
+</body>
+</html>

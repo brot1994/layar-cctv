@@ -31,7 +31,8 @@ public class MainActivity extends Activity {
     private WebServer webServer;
     private final List<VideoCell> cells = new ArrayList<>();
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private static final int WEB_PORT = 8080;
+    private static final int[] WEB_PORTS = {8080, 8081, 8090, 8888, 9090};
+    private int webPort = 0; // port yang berhasil dipakai (0 = gagal)
     private int gap = 4; // jarak antar kotak (px)
 
     @Override
@@ -56,10 +57,23 @@ public class MainActivity extends Activity {
     }
 
     private void startWeb() {
-        try {
-            webServer = new WebServer(this, WEB_PORT, () -> ui.post(this::build));
-            webServer.start();
-        } catch (Exception ignored) {}
+        for (int port : WEB_PORTS) {
+            try {
+                WebServer ws = new WebServer(this, port, () -> ui.post(this::build));
+                ws.start();
+                webServer = ws;
+                webPort = port;
+                return;
+            } catch (Exception ignored) {
+                // port dipakai aplikasi lain, coba port berikutnya
+            }
+        }
+    }
+
+    /** Alamat halaman setting yang benar-benar aktif, untuk ditampilkan di layar TV. */
+    private String settingUrl() {
+        if (webPort == 0) return "Server setting gagal start (semua port terpakai)";
+        return "http://" + localIp() + ":" + webPort;
     }
 
     // ---------- bangun tampilan dari config ----------
@@ -70,7 +84,7 @@ public class MainActivity extends Activity {
 
         Config cfg = ConfigStore.load(this);
         if (cfg.cameras.isEmpty()) {
-            showMessage("Belum ada kamera.\n\nBuka  http://" + localIp() + ":" + WEB_PORT
+            showMessage("Belum ada kamera.\n\nBuka  " + settingUrl()
                     + "  di HP (WiFi yang sama) untuk setting.");
             return;
         }
@@ -83,7 +97,7 @@ public class MainActivity extends Activity {
             cell.start();
         }
 
-        showHint("Setting: http://" + localIp() + ":" + WEB_PORT, needsPassword(cfg));
+        showHint("Setting: " + settingUrl(), needsPassword(cfg) || webPort == 0);
     }
 
     private boolean needsPassword(Config cfg) {

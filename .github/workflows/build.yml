@@ -24,8 +24,13 @@ jobs:
           ls "$ANDROID_HOME/platforms" || true
           ls "$ANDROID_HOME/build-tools" || true
 
-      - name: Generate Gradle wrapper (8.2)
-        run: gradle wrapper --gradle-version 8.2
+      - name: Generate Gradle wrapper 8.2 (di folder kosong, lalu salin ke project)
+        run: |
+          mkdir -p "$RUNNER_TEMP/wrap"
+          cd "$RUNNER_TEMP/wrap"
+          gradle wrapper --gradle-version 8.2
+          cp -r gradle gradlew gradlew.bat "$GITHUB_WORKSPACE/"
+          chmod +x "$GITHUB_WORKSPACE/gradlew"
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace

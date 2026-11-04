@@ -1,0 +1,74 @@
+name: Build Remote TV (Windows)
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'RemoteTV/**'
+      - '.github/workflows/remotetv.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish RemoteTV.exe (self-contained, satu file)
+        shell: pwsh
+        run: |
+          dotnet publish RemoteTV/RemoteTV.csproj -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true -o out
+          Get-ChildItem out | Format-Table Name, Length
+
+      - name: Unduh scrcpy (berisi adb.exe)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path scrcpy_dl | Out-Null
+          gh release download --repo Genymobile/scrcpy --pattern "scrcpy-win64-*.zip" --dir scrcpy_dl
+          Get-ChildItem scrcpy_dl
+          $zip = Get-ChildItem scrcpy_dl -Filter "scrcpy-win64-*.zip" | Select-Object -First 1
+          Expand-Archive -Path $zip.FullName -DestinationPath scrcpy_x -Force
+          Get-ChildItem scrcpy_x
+
+      - name: Susun folder distribusi
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/RemoteTV/tools | Out-Null
+          Copy-Item out/RemoteTV.exe dist/RemoteTV/RemoteTV.exe
+          Copy-Item RemoteTV/README.txt dist/RemoteTV/README.txt
+          $inner = Get-ChildItem scrcpy_x -Directory | Select-Object -First 1
+          Copy-Item -Path "$($inner.FullName)\*" -Destination dist/RemoteTV/tools -Recurse -Force
+          if (-not (Test-Path dist/RemoteTV/tools/adb.exe)) { throw "adb.exe tidak ada di paket scrcpy" }
+          if (-not (Test-Path dist/RemoteTV/tools/scrcpy.exe)) { throw "scrcpy.exe tidak ada" }
+          Compress-Archive -Path dist/RemoteTV -DestinationPath RemoteTV.zip -Force
+          Get-Item RemoteTV.zip | Format-Table Name, Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RemoteTV
+          path: RemoteTV.zip
+          if-no-files-found: error
+
+      - name: Publish zip as GitHub Release
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "remotetv-$env:GITHUB_RUN_NUMBER" RemoteTV.zip `
+            --title "Remote TV build $env:GITHUB_RUN_NUMBER" `
+            --notes "Aplikasi Windows Remote TV (ADB). Ekstrak zip lalu jalankan RemoteTV.exe."

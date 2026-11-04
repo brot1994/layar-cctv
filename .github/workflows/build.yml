@@ -3,6 +3,9 @@ name: Build APK
 on:
   push:
     branches: [ main, master ]
+    paths-ignore:
+      - 'RemoteTV/**'
+      - '.github/workflows/remotetv.yml'
   workflow_dispatch:
 
 permissions:

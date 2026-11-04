@@ -9,6 +9,8 @@ public class MainForm : Form
     readonly Adb adb = new();
     readonly AppSettings settings = AppSettings.Load();
     string serial = null; // "ip:port" TV yang sedang terhubung
+    Process scrcpyProc;   // jendela scrcpy yang sedang terbuka (maks. satu)
+    int pendingKeys;      // jumlah tombol yang sedang antre
 
     // --- kontrol ---
     readonly ComboBox cbTv = new();
@@ -64,7 +66,7 @@ public class MainForm : Form
         txtLog.Font = new Font("Consolas", 9f);
 
         // ---- baris koneksi (atas) ----
-        var top = new Panel { Dock = DockStyle.Top, Height = 84, Padding = new Padding(10, 8, 10, 4) };
+        var top = new Panel { Dock = DockStyle.Top, Height = 92, Padding = new Padding(10, 8, 10, 4) };
 
         var lbl = new Label { Text = "TV", AutoSize = true, Location = new Point(10, 14) };
         cbTv.DropDownStyle = ComboBoxStyle.DropDown;
@@ -85,7 +87,7 @@ public class MainForm : Form
 
         lblStatus.AutoSize = false;
         lblStatus.Location = new Point(10, 46);
-        lblStatus.Size = new Size(326, 24);
+        lblStatus.Size = new Size(326, 38);
         lblStatus.Text = "Belum terhubung. Isi IP TV lalu klik Hubungkan.";
         lblStatus.ForeColor = Color.DimGray;
 
@@ -269,6 +271,11 @@ public class MainForm : Form
         btnMirror.Click += (s, e) => StartScrcpy();
 
         var panel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10) };
+        var gap2 = new Panel { Height = 8, Dock = DockStyle.Top };
+        var btnReset = new Button { Text = "Reset ADB (kalau tombol macet)", Height = 42, Dock = DockStyle.Top };
+        btnReset.Click += async (s, e) => await ResetAdbAsync();
+        panel.Controls.Add(btnReset);
+        panel.Controls.Add(gap2);
         panel.Controls.Add(btnMirror);
         panel.Controls.Add(gap);
         panel.Controls.Add(btnShot);
@@ -419,26 +426,43 @@ public class MainForm : Form
             }
             else if (state == "unauthorized")
             {
-                serial = null;
-                SetStatus("Lihat layar TV: pilih \"Always allow\", lalu klik Hubungkan lagi.", Color.DarkOrange);
+                if (serial == ip) serial = null;
+                SetStatus("Lihat layar TV: pilih \"Always allow\", lalu klik Hubungkan lagi." + KeepNote(), Color.DarkOrange);
             }
             else
             {
-                serial = null;
-                SetStatus("Gagal terhubung. Pastikan Network debugging aktif di TV.", Color.Firebrick);
-                if (!auto) Log("Tips: di TV buka Settings > System > Developer options > aktifkan USB/Network debugging.");
+                if (serial == ip) serial = null;
+                SetStatus("Gagal terhubung ke " + ip + "." + KeepNote(), serial != null ? Color.DarkOrange : Color.Firebrick);
+                if (!auto) Log("Tips: di TV buka Settings > System > Developer options > aktifkan Network debugging / Wireless debugging (USB debugging saja tidak cukup).");
             }
         }
         finally { btnConnect.Enabled = true; }
     }
+
+    /// <summary>Catatan untuk status: TV lama tetap dipakai bila koneksi baru gagal.</summary>
+    string KeepNote()
+        => serial != null ? " Tetap memakai " + serial + "." : " Pastikan Network debugging aktif di TV.";
 
     // ============================== Aksi ==============================
 
     async Task SendKeyAsync(int code)
     {
         if (!Ready()) return;
-        var r = await adb.RunAsync(Dev("shell", "input", "keyevent", code.ToString()), 8000);
-        if (r.Code != 0) Log("Tombol gagal: " + r.Output);
+        // jangan menumpuk antrean bila TV sedang lambat
+        if (Interlocked.Increment(ref pendingKeys) > 3)
+        {
+            Interlocked.Decrement(ref pendingKeys);
+            return;
+        }
+        try
+        {
+            var r = await adb.RunAsync(Dev("shell", "input", "keyevent", code.ToString()), 8000);
+            if (r.Code == -2)
+                Log("TV tidak menjawab (mungkin sedang sibuk). Tutup jendela scrcpy bila terbuka, atau pakai Layar > Reset ADB.");
+            else if (r.Code != 0)
+                Log("Tombol gagal: " + r.Output);
+        }
+        finally { Interlocked.Decrement(ref pendingKeys); }
     }
 
     async Task SendTextAsync()
@@ -538,12 +562,27 @@ public class MainForm : Form
         catch (Exception ex) { Log("Screenshot gagal: " + ex.Message); }
     }
 
+    async Task ResetAdbAsync()
+    {
+        Log("Mereset ADB …");
+        try { if (scrcpyProc != null && !scrcpyProc.HasExited) scrcpyProc.Kill(true); } catch { }
+        var r = await adb.RunAsync(new[] { "kill-server" }, 10000);
+        Log("kill-server: " + (string.IsNullOrEmpty(r.Output) ? "ok" : r.Output));
+        serial = null;
+        await ConnectAsync();
+    }
+
     void StartScrcpy()
     {
         if (!Ready()) return;
         if (!adb.HasScrcpy)
         {
             Log("scrcpy.exe tidak ditemukan di folder tools.");
+            return;
+        }
+        if (scrcpyProc != null && !scrcpyProc.HasExited)
+        {
+            Log("Layar TV sudah terbuka (jendela scrcpy). Tutup dulu jendelanya bila ingin membuka ulang.");
             return;
         }
         try
@@ -558,11 +597,15 @@ public class MainForm : Form
             psi.ArgumentList.Add(serial);
             psi.ArgumentList.Add("--no-audio");
             psi.ArgumentList.Add("-m");
-            psi.ArgumentList.Add("1280");
+            psi.ArgumentList.Add("960");
+            psi.ArgumentList.Add("-b");
+            psi.ArgumentList.Add("2M");
+            psi.ArgumentList.Add("--max-fps");
+            psi.ArgumentList.Add("15");
             psi.ArgumentList.Add("--window-title");
             psi.ArgumentList.Add("Layar TV " + serial);
-            Process.Start(psi);
-            Log("Membuka layar TV (scrcpy) …");
+            scrcpyProc = Process.Start(psi);
+            Log("Membuka layar TV (scrcpy, mode ringan) …");
         }
         catch (Exception ex) { Log("Gagal membuka scrcpy: " + ex.Message); }
     }

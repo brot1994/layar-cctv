@@ -6,26 +6,47 @@ import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Seluruh pengaturan tampilan. Kamera index-0 = kotak besar. */
+/**
+ * Seluruh pengaturan. Yang disimpan: user/password default, buffer, dan daftar halaman.
+ * Field layout & cameras hanya "pandangan" untuk satu halaman CCTV yang sedang digambar
+ * (lihat forPage) dan tidak ikut disimpan.
+ */
 public class Config {
-    public String layout = "1+5";   // "1+5", "1+3", "2x2"
     public String defaultUser = "admin";
     public String defaultPass = "";
     public int networkCaching = 600; // ms, makin besar makin stabil tapi makin delay
+    public List<Page> pages = new ArrayList<>();
+
+    // pandangan satu halaman CCTV (dipakai kode penggambar grid)
+    public String layout = "1+5";
     public List<Camera> cameras = new ArrayList<>();
 
     public static Config fromJson(JSONObject o) {
         Config c = new Config();
-        c.layout = o.optString("layout", "1+5");
         c.defaultUser = o.optString("defaultUser", "admin");
         c.defaultPass = o.optString("defaultPass", "");
         c.networkCaching = o.optInt("networkCaching", 600);
-        JSONArray arr = o.optJSONArray("cameras");
-        if (arr != null) {
-            for (int i = 0; i < arr.length(); i++) {
-                JSONObject co = arr.optJSONObject(i);
-                if (co != null) c.cameras.add(Camera.fromJson(co));
+
+        JSONArray pa = o.optJSONArray("pages");
+        if (pa != null) {
+            for (int i = 0; i < pa.length(); i++) {
+                JSONObject po = pa.optJSONObject(i);
+                if (po != null) c.pages.add(Page.fromJson(po));
             }
+        } else {
+            // format lama (sebelum ada rotasi): satu layout + daftar kamera -> jadi satu halaman CCTV
+            Page p = new Page();
+            p.type = Page.CCTV;
+            p.name = "CCTV";
+            p.layout = o.optString("layout", "1+5");
+            JSONArray arr = o.optJSONArray("cameras");
+            if (arr != null) {
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject co = arr.optJSONObject(i);
+                    if (co != null) p.cameras.add(Camera.fromJson(co));
+                }
+            }
+            c.pages.add(p);
         }
         return c;
     }
@@ -33,36 +54,47 @@ public class Config {
     public JSONObject toJson() {
         JSONObject o = new JSONObject();
         try {
-            o.put("layout", layout);
             o.put("defaultUser", defaultUser);
             o.put("defaultPass", defaultPass);
             o.put("networkCaching", networkCaching);
             JSONArray arr = new JSONArray();
-            for (Camera cam : cameras) arr.put(cam.toJson());
-            o.put("cameras", arr);
+            for (Page p : pages) arr.put(p.toJson());
+            o.put("pages", arr);
         } catch (Exception ignored) {}
         return o;
     }
 
-    /** Konfigurasi awal: 1 besar (PTZ .65) + 5 kecil. Password diisi dari HP. */
-    public static Config defaultConfig() {
+    /** Salinan ringan untuk menggambar satu halaman CCTV. */
+    public Config forPage(Page p) {
         Config c = new Config();
-        c.layout = "1+5";
-        c.defaultUser = "admin";
-        c.defaultPass = "";           // isi password DVR .50 di sini lewat HP
-
-        c.cameras.add(cam("PTZ Produksi", "10.46.10.65", 1, false, "", ""));   // KOTAK BESAR
-        c.cameras.add(cam("Kamera 100",   "10.46.10.100", 1, true, "", ""));    // password sendiri
-        c.cameras.add(cam("DVR Cam 1",    "10.46.10.50", 1, true, "", ""));
-        c.cameras.add(cam("DVR Cam 2",    "10.46.10.50", 2, true, "", ""));
-        c.cameras.add(cam("DVR Cam 3",    "10.46.10.50", 3, true, "", ""));
-        c.cameras.add(cam("DVR Cam 4",    "10.46.10.50", 4, true, "", ""));
+        c.defaultUser = defaultUser;
+        c.defaultPass = defaultPass;
+        c.networkCaching = networkCaching;
+        c.layout = p.layout;
+        c.cameras = p.cameras;
         return c;
     }
 
-    private static Camera cam(String name, String ip, int ch, boolean sub, String u, String p) {
+    /** Konfigurasi awal: satu halaman CCTV 1 besar + 5 kecil. Password diisi dari halaman setting. */
+    public static Config defaultConfig() {
+        Config c = new Config();
+        Page p = new Page();
+        p.type = Page.CCTV;
+        p.name = "CCTV";
+        p.layout = "1+5";
+        p.cameras.add(cam("PTZ Produksi", "10.46.10.65", 1, false));   // KOTAK BESAR
+        p.cameras.add(cam("Kamera 100",   "10.46.10.100", 1, true));
+        p.cameras.add(cam("DVR Cam 1",    "10.46.10.50", 1, true));
+        p.cameras.add(cam("DVR Cam 2",    "10.46.10.50", 2, true));
+        p.cameras.add(cam("DVR Cam 3",    "10.46.10.50", 3, true));
+        p.cameras.add(cam("DVR Cam 4",    "10.46.10.50", 4, true));
+        c.pages.add(p);
+        return c;
+    }
+
+    private static Camera cam(String name, String ip, int ch, boolean sub) {
         Camera c = new Camera();
-        c.name = name; c.ip = ip; c.channel = ch; c.sub = sub; c.user = u; c.pass = p;
+        c.name = name; c.ip = ip; c.channel = ch; c.sub = sub;
         return c;
     }
 }

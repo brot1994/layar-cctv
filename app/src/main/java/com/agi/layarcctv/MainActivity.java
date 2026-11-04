@@ -2,6 +2,7 @@ package com.agi.layarcctv;
 
 import android.app.Activity;
 import android.graphics.Color;
+import android.net.http.SslError;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -9,11 +10,16 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.webkit.SslErrorHandler;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import org.json.JSONObject;
 import org.videolan.libvlc.LibVLC;
 import org.videolan.libvlc.util.VLCVideoLayout;
 
@@ -33,7 +39,34 @@ public class MainActivity extends Activity {
     private final Handler ui = new Handler(Looper.getMainLooper());
     private static final int[] WEB_PORTS = {8080, 8081, 8090, 8888, 9090};
     private int webPort = 0; // port yang berhasil dipakai (0 = gagal)
-    private int gap = 4; // jarak antar kotak (px)
+    private int gap = 4;     // jarak antar kotak (px)
+
+    // ---- rotasi ----
+    private Config cfg;
+    private List<Page> pages = new ArrayList<>();
+    private volatile int cur = -1;
+    private volatile boolean paused = false;
+    private boolean screenShowing = false;
+    private boolean hintDone = false;
+    private final Runnable rotateTask = this::next;
+
+    // ---- halaman web ----
+    private WebView webView;
+    private TextView webError;
+    private Runnable refreshTask;
+    private Runnable retryTask;
+
+    /** Jembatan dari halaman setting (HP/laptop) ke aplikasi. */
+    private final WebServer.Controller controller = new WebServer.Controller() {
+        @Override public void onConfigChanged() { ui.post(MainActivity.this::startRotation); }
+        @Override public String control(String cmd, int index) {
+            final String c = cmd;
+            final int i = index;
+            ui.post(() -> doControl(c, i));
+            return statusJson();
+        }
+        @Override public String status() { return statusJson(); }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -53,13 +86,13 @@ public class MainActivity extends Activity {
         libVLC = new LibVLC(this, opts);
 
         startWeb();
-        build();
+        startRotation();
     }
 
     private void startWeb() {
         for (int port : WEB_PORTS) {
             try {
-                WebServer ws = new WebServer(this, port, () -> ui.post(this::build));
+                WebServer ws = new WebServer(this, port, controller);
                 ws.start();
                 webServer = ws;
                 webPort = port;
@@ -76,63 +109,296 @@ public class MainActivity extends Activity {
         return "http://" + localIp() + ":" + webPort;
     }
 
-    // ---------- bangun tampilan dari config ----------
+    // ============================== rotasi ==============================
 
-    private void build() {
-        releaseCells();
-        root.removeAllViews();
+    /** Muat ulang config dan mulai rotasi dari awal. */
+    private void startRotation() {
+        ui.removeCallbacks(rotateTask);
+        cfg = ConfigStore.load(this);
+        pages = cfg.pages;
+        cur = -1;
+        paused = false;
+        screenShowing = false;
+        hintDone = false;
+        advance(1);
+    }
 
-        Config cfg = ConfigStore.load(this);
-        if (cfg.cameras.isEmpty()) {
-            showMessage("Belum ada kamera.\n\nBuka  " + settingUrl()
-                    + "  di HP (WiFi yang sama) untuk setting.");
+    private void next() { advance(1); }
+
+    /** Pindah ke halaman aktif berikutnya (dir = 1) atau sebelumnya (dir = -1). */
+    private void advance(int dir) {
+        ui.removeCallbacks(rotateTask);
+        int n = pages.size();
+        if (n == 0) {
+            clearScreen();
+            showMessage("Belum ada halaman.\n\nBuka  " + settingUrl() + "  di HP/laptop (WiFi yang sama) untuk setting.");
             return;
         }
 
-        List<VLCVideoLayout> videos = buildGrid(cfg);
-        for (int i = 0; i < videos.size() && i < cfg.cameras.size(); i++) {
-            Camera cam = cfg.cameras.get(i);
-            VideoCell cell = new VideoCell(libVLC, videos.get(i), cam.url(cfg), cfg.networkCaching, ui);
-            cells.add(cell);
-            cell.start();
+        int active = 0;
+        for (Page p : pages) if (p.isActiveNow()) active++;
+
+        int found = -1;
+        for (int i = 1; i <= n && found < 0; i++) {
+            int idx = (((cur + dir * i) % n) + n) % n;
+            if (pages.get(idx).isActiveNow()) found = idx;
         }
 
-        showHint("Setting: " + settingUrl(), needsPassword(cfg) || webPort == 0);
+        if (found < 0) {
+            // tidak ada halaman yang aktif sekarang (mis. di luar jam tayang): cek lagi sebentar lagi
+            cur = -1;
+            clearScreen();
+            showMessage("Tidak ada halaman yang aktif saat ini.\n\nSetting: " + settingUrl());
+            if (!paused) ui.postDelayed(rotateTask, 30000);
+            return;
+        }
+
+        if (found == cur && active == 1 && screenShowing) {
+            // hanya satu halaman aktif dan sudah tampil: jangan digambar ulang
+            scheduleNext();
+            return;
+        }
+
+        cur = found;
+        showPage(pages.get(cur));
+        scheduleNext();
     }
 
-    private boolean needsPassword(Config cfg) {
-        for (Camera c : cfg.cameras) {
-            String u = (c.user != null && !c.user.isEmpty()) ? c.user : cfg.defaultUser;
-            String p = (c.pass != null && !c.pass.isEmpty()) ? c.pass : cfg.defaultPass;
+    private void scheduleNext() {
+        ui.removeCallbacks(rotateTask);
+        if (paused || cur < 0 || cur >= pages.size()) return;
+        int active = 0;
+        for (Page p : pages) if (p.isActiveNow()) active++;
+        long d = Math.max(5, pages.get(cur).duration) * 1000L;
+        if (active <= 1) d = Math.max(d, 30000L);
+        ui.postDelayed(rotateTask, d);
+    }
+
+    private void doControl(String cmd, int idx) {
+        switch (cmd) {
+            case "next":
+                advance(1);
+                break;
+            case "prev":
+                advance(-1);
+                break;
+            case "pause":
+                paused = true;
+                ui.removeCallbacks(rotateTask);
+                break;
+            case "resume":
+                paused = false;
+                scheduleNext();
+                break;
+            case "show":
+                if (idx >= 0 && idx < pages.size()) {
+                    ui.removeCallbacks(rotateTask);
+                    cur = idx;
+                    showPage(pages.get(cur));
+                    scheduleNext();
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    private String statusJson() {
+        try {
+            JSONObject o = new JSONObject();
+            List<Page> ps = pages;
+            int c = cur;
+            o.put("count", ps.size());
+            o.put("current", c);
+            o.put("paused", paused);
+            o.put("title", (c >= 0 && c < ps.size()) ? ps.get(c).title() : "");
+            return o.toString();
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    // ============================== tampilkan satu halaman ==============================
+
+    private void showPage(Page p) {
+        clearScreen();
+        boolean attention = webPort == 0;
+        if (p.isWeb()) {
+            showWeb(p);
+        } else {
+            Config pc = cfg.forPage(p);
+            if (pc.cameras.isEmpty()) {
+                showMessage("Halaman CCTV \"" + p.title() + "\" belum ada kamera.\n\nBuka  " + settingUrl());
+            } else {
+                List<VLCVideoLayout> videos = buildGrid(pc);
+                for (int i = 0; i < videos.size() && i < pc.cameras.size(); i++) {
+                    Camera cam = pc.cameras.get(i);
+                    VideoCell cell = new VideoCell(libVLC, videos.get(i), cam.url(pc), pc.networkCaching, ui);
+                    cells.add(cell);
+                    cell.start();
+                }
+                if (needsPassword(pc)) attention = true;
+            }
+        }
+        screenShowing = true;
+        if (!hintDone || attention) {
+            showHint("Setting: " + settingUrl(), attention);
+            hintDone = true;
+        }
+    }
+
+    /** Hentikan semua pemutar/WebView dan kosongkan layar. */
+    private void clearScreen() {
+        screenShowing = false;
+        releaseCells();
+        destroyWeb();
+        root.removeAllViews();
+    }
+
+    private boolean needsPassword(Config pc) {
+        for (Camera c : pc.cameras) {
+            String u = (c.user != null && !c.user.isEmpty()) ? c.user : pc.defaultUser;
+            String p = (c.pass != null && !c.pass.isEmpty()) ? c.pass : pc.defaultPass;
             if (!u.isEmpty() && p.isEmpty()) return true;
         }
         return false;
     }
 
-    /** Buat kotak-kotak dan kembalikan daftar VLCVideoLayout (index 0 = kotak besar). */
-    private List<VLCVideoLayout> buildGrid(Config cfg) {
-        int n = cfg.cameras.size();
-        String layout = cfg.layout == null ? "1+5" : cfg.layout;
+    // ============================== halaman web ==============================
 
+    private static String normalizeUrl(String u) {
+        if (u == null) return "about:blank";
+        u = u.trim();
+        if (u.isEmpty()) return "about:blank";
+        if (!u.contains("://")) u = "http://" + u;
+        return u;
+    }
+
+    private void showWeb(final Page p) {
+        try {
+            final WebView wv = new WebView(this);
+            WebSettings s = wv.getSettings();
+            s.setJavaScriptEnabled(true);
+            s.setDomStorageEnabled(true);
+            s.setMediaPlaybackRequiresUserGesture(false);
+            s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+            s.setUseWideViewPort(true);
+            s.setLoadWithOverviewMode(true);
+            wv.setBackgroundColor(Color.BLACK);
+            if (p.zoom > 0) wv.setInitialScale(p.zoom);
+
+            wv.setWebViewClient(new WebViewClient() {
+                @Override
+                public void onReceivedSslError(WebView v, SslErrorHandler h, SslError e) {
+                    if (p.ignoreSsl) {
+                        h.proceed();
+                    } else {
+                        h.cancel();
+                        webFailed(wv, "Sertifikat tidak valid. Centang \"Abaikan error sertifikat\" di setting bila ini situs internal.");
+                    }
+                }
+
+                @SuppressWarnings("deprecation")
+                @Override
+                public void onReceivedError(WebView v, int code, String desc, String failingUrl) {
+                    webFailed(wv, "Gagal memuat halaman (" + desc + "). Mencoba lagi …");
+                }
+
+                @Override
+                public void onPageFinished(WebView v, String url) {
+                    if (webError != null) {
+                        root.removeView(webError);
+                        webError = null;
+                    }
+                }
+            });
+
+            root.addView(wv, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            webView = wv;
+            wv.loadUrl(normalizeUrl(p.url));
+
+            if (p.refreshMin > 0) {
+                final long every = p.refreshMin * 60000L;
+                refreshTask = new Runnable() {
+                    @Override public void run() {
+                        if (webView == wv) {
+                            wv.reload();
+                            ui.postDelayed(this, every);
+                        }
+                    }
+                };
+                ui.postDelayed(refreshTask, every);
+            }
+        } catch (Throwable t) {
+            showMessage("WebView tidak tersedia di TV ini.\n\n" + t.getMessage());
+        }
+    }
+
+    private void webFailed(final WebView wv, String text) {
+        if (webView != wv) return;
+        if (webError == null) {
+            webError = new TextView(this);
+            webError.setTextColor(Color.WHITE);
+            webError.setTextSize(16);
+            webError.setPadding(24, 12, 24, 12);
+            webError.setBackgroundColor(Color.parseColor("#CC7F1D1D"));
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+            lp.setMargins(0, 0, 0, 40);
+            root.addView(webError, lp);
+        }
+        webError.setText(text);
+        if (retryTask != null) ui.removeCallbacks(retryTask);
+        retryTask = new Runnable() {
+            @Override public void run() {
+                if (webView == wv) wv.reload();
+            }
+        };
+        ui.postDelayed(retryTask, 20000);
+    }
+
+    private void destroyWeb() {
+        if (refreshTask != null) { ui.removeCallbacks(refreshTask); refreshTask = null; }
+        if (retryTask != null) { ui.removeCallbacks(retryTask); retryTask = null; }
+        webError = null;
+        if (webView != null) {
+            WebView wv = webView;
+            webView = null;
+            try {
+                wv.stopLoading();
+                wv.loadUrl("about:blank");
+                ViewGroup parent = (ViewGroup) wv.getParent();
+                if (parent != null) parent.removeView(wv);
+                wv.destroy();
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    // ============================== grid CCTV ==============================
+
+    /** Buat kotak-kotak dan kembalikan daftar VLCVideoLayout (index 0 = kotak besar). */
+    private List<VLCVideoLayout> buildGrid(Config c) {
+        String layout = c.layout == null ? "1+5" : c.layout;
         if (layout.equals("1+3")) {
-            return buildBigPlusColumn(cfg, 3);
+            return buildBigPlusColumn(c, 3);
         } else if (layout.equals("2x2")) {
-            return buildUniformGrid(cfg, 2, 2);
+            return buildUniformGrid(c, 2, 2);
         } else {
-            // default 1+5 : grid 3x3, besar span 2x2 kiri-atas
-            return buildOnePlusFive(cfg);
+            return buildOnePlusFive(c);
         }
     }
 
     /** 1 besar di kiri (bobot 2) + kolom kanan berisi beberapa kotak kecil. */
-    private List<VLCVideoLayout> buildBigPlusColumn(Config cfg, int smallCount) {
+    private List<VLCVideoLayout> buildBigPlusColumn(Config c, int smallCount) {
         List<VLCVideoLayout> out = new ArrayList<>();
         LinearLayout h = new LinearLayout(this);
         h.setOrientation(LinearLayout.HORIZONTAL);
         root.addView(h, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        FrameLayout big = makeCell(cfg, 0);
+        FrameLayout big = makeCell(c, 0);
         out.add((VLCVideoLayout) big.getChildAt(0));
         LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.MATCH_PARENT, 2f);
@@ -145,8 +411,8 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, 1f);
         h.addView(col, cp);
 
-        for (int i = 1; i <= smallCount && i < cfg.cameras.size(); i++) {
-            FrameLayout cell = makeCell(cfg, i);
+        for (int i = 1; i <= smallCount && i < c.cameras.size(); i++) {
+            FrameLayout cell = makeCell(c, i);
             out.add((VLCVideoLayout) cell.getChildAt(0));
             LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
@@ -157,7 +423,7 @@ public class MainActivity extends Activity {
     }
 
     /** 1 besar (2x2) + 5 kecil dalam grid 3x3, meniru susunan dinding CCTV. */
-    private List<VLCVideoLayout> buildOnePlusFive(Config cfg) {
+    private List<VLCVideoLayout> buildOnePlusFive(Config c) {
         List<VLCVideoLayout> out = new ArrayList<>();
         GridLayout g = new GridLayout(this);
         g.setRowCount(3);
@@ -166,16 +432,16 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         // besar: baris 0-1, kolom 0-1
-        addGridCell(g, cfg, out, 0, 0, 2, 2);
+        addGridCell(g, c, out, 0, 0, 2, 2);
         // 5 kecil
         int[][] pos = {{0, 2}, {1, 2}, {2, 0}, {2, 1}, {2, 2}};
-        for (int i = 0; i < pos.length && (i + 1) < cfg.cameras.size(); i++) {
-            addGridCell(g, cfg, out, pos[i][0], pos[i][1], 1, 1);
+        for (int i = 0; i < pos.length && (i + 1) < c.cameras.size(); i++) {
+            addGridCell(g, c, out, pos[i][0], pos[i][1], 1, 1);
         }
         return out;
     }
 
-    private List<VLCVideoLayout> buildUniformGrid(Config cfg, int rows, int cols) {
+    private List<VLCVideoLayout> buildUniformGrid(Config c, int rows, int cols) {
         List<VLCVideoLayout> out = new ArrayList<>();
         GridLayout g = new GridLayout(this);
         g.setRowCount(rows);
@@ -184,19 +450,19 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         int idx = 0;
         for (int r = 0; r < rows; r++) {
-            for (int c = 0; c < cols; c++) {
-                if (idx >= cfg.cameras.size()) break;
-                addGridCell(g, cfg, out, r, c, 1, 1);
+            for (int col = 0; col < cols; col++) {
+                if (idx >= c.cameras.size()) break;
+                addGridCell(g, c, out, r, col, 1, 1);
                 idx++;
             }
         }
         return out;
     }
 
-    private void addGridCell(GridLayout g, Config cfg, List<VLCVideoLayout> out,
+    private void addGridCell(GridLayout g, Config c, List<VLCVideoLayout> out,
                              int row, int col, int rowSpan, int colSpan) {
         int index = out.size();
-        FrameLayout cell = makeCell(cfg, index);
+        FrameLayout cell = makeCell(c, index);
         out.add((VLCVideoLayout) cell.getChildAt(0));
 
         GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
@@ -209,7 +475,7 @@ public class MainActivity extends Activity {
     }
 
     /** Satu kotak = FrameLayout berisi VLCVideoLayout + label nama di pojok. */
-    private FrameLayout makeCell(Config cfg, int index) {
+    private FrameLayout makeCell(Config c, int index) {
         FrameLayout cell = new FrameLayout(this);
         cell.setBackgroundColor(Color.parseColor("#111111"));
 
@@ -218,7 +484,7 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         String name = "";
-        if (index < cfg.cameras.size()) name = cfg.cameras.get(index).name;
+        if (index < c.cameras.size()) name = c.cameras.get(index).name;
         if (name != null && !name.isEmpty()) {
             TextView label = new TextView(this);
             label.setText(name);
@@ -239,7 +505,7 @@ public class MainActivity extends Activity {
         p.setMargins(gap, gap, gap, gap);
     }
 
-    // ---------- overlay pesan & hint ----------
+    // ============================== overlay pesan & hint ==============================
 
     private void showMessage(String text) {
         TextView tv = new TextView(this);
@@ -272,7 +538,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ---------- util ----------
+    // ============================== util ==============================
 
     private void releaseCells() {
         for (VideoCell c : cells) c.release();
@@ -317,7 +583,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        releaseCells();
+        ui.removeCallbacks(rotateTask);
+        clearScreen();
         if (webServer != null) webServer.stop();
         if (libVLC != null) {
             try { libVLC.release(); } catch (Exception ignored) {}

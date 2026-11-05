@@ -96,6 +96,21 @@ var PRESET_OVERALL = [
 "    t3.style.display = 'none';",
 "  };",
 "  window.flip_flop();",
+"  // warna selang-seling per kelompok: putih dan hijau muda (ubah kode warna di sini)",
+"  var COLOR_A = '#ffffff', COLOR_B = '#e4f5e4', COLOR_HEAD = '#c8e6c9';",
+"  var stripe = function(t){",
+"    var n = 0; t.style.backgroundColor = COLOR_A;",
+"    var rs = t.tBodies[0].rows;",
+"    for (var r = 0; r < rs.length; r++) {",
+"      var f = rs[r].cells[0];",
+"      if (!f) continue;",
+"      if (f.tagName === 'TH') { rs[r].style.backgroundColor = COLOR_HEAD; continue; }",
+"      if (f.colSpan >= 10) continue;",
+"      if (f.querySelector('[id^=call_status]')) n++;",
+"      rs[r].style.backgroundColor = (n % 2 === 1) ? COLOR_A : COLOR_B;",
+"    }",
+"  };",
+"  stripe(t1); stripe(t2);",
 "}"
 ].join('\n');
 

@@ -369,7 +369,9 @@ public class MainActivity extends Activity {
                 vpJs0 = "";
                 if (p.zoom > 0) wv.setInitialScale(p.zoom);
             }
-            final String vpJs = vpJs0 + stretchJs;
+            final String customJs = (p.customJs == null || p.customJs.trim().isEmpty()) ? ""
+                    : "(function(){try{\n" + p.customJs + "\n}catch(e){}})();";
+            final String vpJs = vpJs0 + customJs + stretchJs;
 
             wv.setWebViewClient(new WebViewClient() {
                 @Override

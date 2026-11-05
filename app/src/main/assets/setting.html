@@ -81,6 +81,24 @@ small{color:#6b7280}
 var CFG = null;
 var PAUSED = false;
 
+var PRESET_OVERALL = [
+"// Andon Counter OVERALL: gabung tabel 3 (SBN, SPIDER) ke tabel 2, lalu bergantian 2 halaman",
+"var FLIP_MS = 10000; // lama tiap halaman (ms)",
+"var t1=document.getElementById('table_data_1'), t2=document.getElementById('table_data_2'), t3=document.getElementById('table_data_3');",
+"if (t1 && t2 && t3 && !t3.__merged) {",
+"  t3.__merged = 1;",
+"  var rows = Array.prototype.slice.call(t3.tBodies[0].rows).slice(2);",
+"  for (var i = 0; i < rows.length; i++) t2.tBodies[0].appendChild(rows[i]);",
+"  window.flip_flop = function(){",
+"    var a = (Math.floor(Date.now() / FLIP_MS) % 2) === 0;",
+"    t1.style.display = a ? '' : 'none';",
+"    t2.style.display = a ? 'none' : '';",
+"    t3.style.display = 'none';",
+"  };",
+"  window.flip_flop();",
+"}"
+].join('\n');
+
 function esc(s){
   return (s + '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -142,6 +160,10 @@ function pageCard(p, i) {
     h += '<label class="ck"><input type="checkbox" data-k="stretch" ' + (p.stretch === false ? '' : 'checked') +
          '> Regangkan tabel ke bawah sampai penuh layar (ukuran tulisan tetap)</label>';
     h += '<div class="row"><div>' + field('Refresh tiap (menit, 0 = tidak)', 'refreshMin', p.refreshMin || 0, 'number') + '</div></div>';
+    h += '<label>Skrip tambahan (JavaScript, opsional)</label>' +
+         '<textarea data-k="customJs" rows="4" style="width:100%;font-family:monospace;font-size:12px" ' +
+         'placeholder="dijalankan setiap halaman selesai dimuat">' + esc(p.customJs || '') + '</textarea>' +
+         '<button class="mv" onclick="var t=this.parentNode.querySelector(\'[data-k=customJs]\');t.value=PRESET_OVERALL;">Isi contoh: Andon Counter OVERALL (3 halaman jadi 2)</button>';
     h += '<label class="ck"><input type="checkbox" data-k="ignoreSsl" ' + (p.ignoreSsl ? 'checked' : '') +
          '> Abaikan error sertifikat (untuk https internal)</label>';
   } else {

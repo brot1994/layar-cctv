@@ -64,6 +64,15 @@ public class MainActivity extends Activity {
     private final Runnable exitFullTask = this::exitFull;
     private final Runnable clearSelTask = () -> setSelection(-1);
 
+    // ---- log kinerja ----
+    private static final long LOG_EVERY = 10000L;
+    private final Runnable logTask = new Runnable() {
+        @Override public void run() {
+            try { logTick(); } catch (Throwable ignored) {}
+            ui.postDelayed(this, LOG_EVERY);
+        }
+    };
+
     // ---- halaman web ----
     private WebView webView;
     private TextView webError;
@@ -100,7 +109,50 @@ public class MainActivity extends Activity {
         libVLC = new LibVLC(this, opts);
 
         startWeb();
+        logHeader();
         startRotation();
+        ui.postDelayed(logTask, LOG_EVERY);
+    }
+
+    private void logHeader() {
+        try {
+            android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+            android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+            am.getMemoryInfo(mi);
+            String soc = "";
+            if (android.os.Build.VERSION.SDK_INT >= 31) soc = " soc=" + android.os.Build.SOC_MANUFACTURER + "/" + android.os.Build.SOC_MODEL;
+            StatsLog.append(this, "=== APLIKASI MULAI === " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL
+                    + " device=" + android.os.Build.DEVICE + " hw=" + android.os.Build.HARDWARE + " board=" + android.os.Build.BOARD + soc
+                    + " android=" + android.os.Build.VERSION.RELEASE + " sdk=" + android.os.Build.VERSION.SDK_INT
+                    + " abi=" + android.os.Build.SUPPORTED_ABIS[0]
+                    + " cpu=" + Runtime.getRuntime().availableProcessors() + "core"
+                    + " ramTotal=" + (mi.totalMem / 1048576) + "MB"
+                    + " layar=" + getResources().getDisplayMetrics().widthPixels + "x" + getResources().getDisplayMetrics().heightPixels);
+        } catch (Throwable ignored) {}
+    }
+
+    /** Dipanggil tiap 10 detik: catat keadaan tiap kotak CCTV dan memori TV. */
+    private void logTick() {
+        if (stopped || cells.isEmpty()) return;
+        String title = (cur >= 0 && cur < pages.size()) ? pages.get(cur).title() : "-";
+        String sys = "";
+        try {
+            android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+            android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+            am.getMemoryInfo(mi);
+            sys = "RAM kosong=" + (mi.availMem / 1048576) + "MB lowMem=" + mi.lowMemory;
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+                sys += " thermal=" + pm.getCurrentThermalStatus();
+            }
+            try {
+                java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader("/proc/loadavg"));
+                String l = r.readLine(); r.close();
+                if (l != null) sys += " load=" + l.split(" ")[0];
+            } catch (Throwable ignored) {}
+        } catch (Throwable ignored) {}
+        StatsLog.append(this, "[" + title + "] " + sys);
+        for (VideoCell c : new ArrayList<>(cells)) StatsLog.append(this, "   " + c.snapshot());
     }
 
     private void startWeb() {
@@ -274,6 +326,7 @@ public class MainActivity extends Activity {
                 for (int i = 0; i < videos.size() && i < pc.cameras.size(); i++) {
                     Camera cam = pc.cameras.get(i);
                     VideoCell cell = new VideoCell(libVLC, videos.get(i), cam.url(pc), pc.networkCaching, ui);
+                    cell.name = cam.name + " (" + cam.quality + ")";
                     cells.add(cell);
                     cell.start();
                 }
@@ -658,6 +711,7 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         VideoCell vc = new VideoCell(libVLC, v, cam.url(pc), pc.networkCaching, ui);
+        vc.name = cam.name + " (" + cam.quality + ", layar penuh)";
         cells.add(vc);
         vc.start();
 

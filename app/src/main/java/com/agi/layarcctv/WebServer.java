@@ -43,6 +43,15 @@ public class WebServer extends NanoHTTPD {
             return json(ConfigStore.load(ctx).toJson().toString());
         }
 
+        if (uri.equals("/log")) {
+            Map<String, String> q = session.getParms();
+            if ("1".equals(q.get("clear"))) StatsLog.clear(ctx);
+            Response r = newFixedLengthResponse(Response.Status.OK, "text/plain; charset=utf-8",
+                    StatsLog.tail(ctx, 400 * 1024));
+            r.addHeader("Content-Disposition", "inline; filename=\"layar-tv-log.txt\"");
+            return r;
+        }
+
         if (uri.equals("/status")) {
             return json(controller.status());
         }

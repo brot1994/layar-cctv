@@ -96,8 +96,8 @@ var PRESET_OVERALL = [
 "    t3.style.display = 'none';",
 "  };",
 "  window.flip_flop();",
-"  // warna selang-seling per kelompok: putih dan hijau muda (ubah kode warna di sini)",
-"  var COLOR_A = '#ffffff', COLOR_B = '#e4f5e4', COLOR_HEAD = '#c8e6c9';",
+"  // warna: putih / hijau muda selang-seling; judul & header kolom hijau lebih tua (ubah kode di sini)",
+"  var COLOR_A = '#ffffff', COLOR_B = '#e4f5e4', COLOR_HEAD = '#cfe3cf';",
 "  var stripe = function(t){",
 "    var n = 0; t.style.backgroundColor = COLOR_A;",
 "    var rs = t.tBodies[0].rows;",
@@ -111,6 +111,7 @@ var PRESET_OVERALL = [
 "    }",
 "  };",
 "  stripe(t1); stripe(t2);",
+"  var sm = document.getElementById('summary'); if (sm) sm.style.backgroundColor = COLOR_HEAD; // bar judul SUMMARY",
 "}"
 ].join('\n');
 

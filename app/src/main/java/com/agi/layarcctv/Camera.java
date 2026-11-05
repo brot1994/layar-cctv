@@ -13,6 +13,7 @@ public class Camera {
     public String user = "";     // kosong = pakai default
     public String pass = "";     // kosong = pakai default
     public String path = "";     // override path RTSP (opsional, untuk non-Hikvision)
+    public String maxRes = "1080"; // "1080" = otomatis turun stream bila resolusi > 1080p; "none" = tanpa batas
 
     public static Camera fromJson(JSONObject o) {
         Camera c = new Camera();
@@ -27,6 +28,7 @@ public class Camera {
         c.user = o.optString("user", "");
         c.pass = o.optString("pass", "");
         c.path = o.optString("path", "");
+        c.maxRes = "none".equals(o.optString("maxRes", "1080")) ? "none" : "1080";
         return c;
     }
 
@@ -42,6 +44,7 @@ public class Camera {
             o.put("user", user);
             o.put("pass", pass);
             o.put("path", path);
+            o.put("maxRes", maxRes);
         } catch (Exception ignored) {}
         return o;
     }
@@ -63,6 +66,23 @@ public class Camera {
         }
         return "rtsp://" + auth + ip + ":" + port + tail;
     }
+
+    /** URL untuk satu tingkat kualitas: "main" (x01), "mid" (x03), "sub" (x02). */
+    public String urlFor(Config cfg, String q) {
+        String keep = quality;
+        quality = q;
+        try { return url(cfg); } finally { quality = keep; }
+    }
+
+    /** Urutan stream yang dicoba: mulai dari kualitas pilihan lalu turun (main -> mid -> sub). */
+    public String[] chain(Config cfg) {
+        if (path != null && !path.isEmpty()) return new String[]{url(cfg)};
+        if ("sub".equals(quality)) return new String[]{urlFor(cfg, "sub")};
+        if ("mid".equals(quality)) return new String[]{urlFor(cfg, "mid"), urlFor(cfg, "sub")};
+        return new String[]{urlFor(cfg, "main"), urlFor(cfg, "mid"), urlFor(cfg, "sub")};
+    }
+
+    public String key() { return ip + ":" + port + ":" + channel + ":" + quality; }
 
     /** Percent-encode khusus bagian userinfo (user & password). */
     private static String enc(String s) {

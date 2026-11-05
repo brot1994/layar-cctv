@@ -109,6 +109,7 @@ public class MainActivity extends Activity {
         libVLC = new LibVLC(this, opts);
 
         startWeb();
+        StatsLog.appCtx = getApplicationContext();
         logHeader();
         startRotation();
         ui.postDelayed(logTask, LOG_EVERY);
@@ -325,7 +326,7 @@ public class MainActivity extends Activity {
                 List<VLCVideoLayout> videos = buildGrid(pc);
                 for (int i = 0; i < videos.size() && i < pc.cameras.size(); i++) {
                     Camera cam = pc.cameras.get(i);
-                    VideoCell cell = new VideoCell(libVLC, videos.get(i), cam.url(pc), pc.networkCaching, ui);
+                    VideoCell cell = new VideoCell(libVLC, videos.get(i), cam.chain(pc), cam.key(), !"none".equals(cam.maxRes), pc.networkCaching, ui);
                     cell.name = cam.name + " (" + cam.quality + ")";
                     cells.add(cell);
                     cell.start();
@@ -710,7 +711,7 @@ public class MainActivity extends Activity {
         root.addView(cell, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        VideoCell vc = new VideoCell(libVLC, v, cam.url(pc), pc.networkCaching, ui);
+        VideoCell vc = new VideoCell(libVLC, v, cam.chain(pc), cam.key(), !"none".equals(cam.maxRes), pc.networkCaching, ui);
         vc.name = cam.name + " (" + cam.quality + ", layar penuh)";
         cells.add(vc);
         vc.start();

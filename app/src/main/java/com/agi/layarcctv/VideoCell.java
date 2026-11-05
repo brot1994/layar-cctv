@@ -14,8 +14,16 @@ import org.videolan.libvlc.util.VLCVideoLayout;
 public class VideoCell {
     private final LibVLC lib;
     private final VLCVideoLayout view;
-    private final String url;
+    private final String[] chain;       // urutan stream: tajam -> sedang -> ringan
+    private final String key;
+    private final boolean limit;        // batas 1080p aktif
+    private int level = 0;
+    private long startedAt = 0;
+    private int resTries = 0;
     private final int caching;
+    private static final java.util.Map<String, Integer> LEARNED = new java.util.HashMap<>();
+    private static final String[] LEVEL_NAME = {"main", "mid", "sub"};
+    private final Runnable resCheck = this::checkRes;
     private final Handler ui;
     private MediaPlayer mp;
     private boolean released = false;
@@ -29,12 +37,17 @@ public class VideoCell {
     private long pDisp, pLost, pDec;      // nilai sebelumnya, untuk selisih
     private int pStalls, pRetries;
 
-    public VideoCell(LibVLC lib, VLCVideoLayout view, String url, int caching, Handler ui) {
+    public VideoCell(LibVLC lib, VLCVideoLayout view, String[] chain, String key, boolean limit,
+                     int caching, Handler ui) {
         this.lib = lib;
         this.view = view;
-        this.url = url;
+        this.chain = chain;
+        this.key = key;
+        this.limit = limit && chain.length > 1;
         this.caching = caching;
         this.ui = ui;
+        Integer l = LEARNED.get(key);
+        if (this.limit && l != null) this.level = Math.min(l, chain.length - 1);
     }
 
     public void start() {
@@ -45,9 +58,17 @@ public class VideoCell {
                     || event.type == MediaPlayer.Event.EndReached) {
                 playing = false;
                 retries++;
+                // stream tingkat lebih rendah (mis. stream ke-3) mungkin tidak ada: cepat turun lagi
+                if (limit && level > 0 && level < chain.length - 1
+                        && System.currentTimeMillis() - startedAt < 10000) {
+                    level++;
+                    LEARNED.put(key, level);
+                    StatsLog.log("   " + name + ": stream tidak tersedia, turun ke " + levelName());
+                }
                 scheduleRetry();
             } else if (event.type == MediaPlayer.Event.Playing) {
                 playing = true;
+                if (limit) { resTries = 0; ui.removeCallbacks(resCheck); ui.postDelayed(resCheck, 3000); }
             } else if (event.type == MediaPlayer.Event.Buffering) {
                 float b = event.getBuffering();
                 if (playing && b < 100f && lastBuf >= 100f) stalls++;
@@ -60,7 +81,8 @@ public class VideoCell {
     private void play() {
         if (released) return;
         try {
-            Media media = new Media(lib, Uri.parse(url));
+            startedAt = System.currentTimeMillis();
+            Media media = new Media(lib, Uri.parse(chain[Math.min(level, chain.length - 1)]));
             media.addOption(":network-caching=" + caching);
             media.addOption(":rtsp-tcp");
             media.addOption(":no-audio");
@@ -70,6 +92,35 @@ public class VideoCell {
             mp.play();
         } catch (Exception e) {
             scheduleRetry();
+        }
+    }
+
+    private String levelName() {
+        int n = chain.length;
+        // chain selalu berakhir di "sub"; tingkat awal bisa main atau mid
+        int idx = LEVEL_NAME.length - n + Math.min(level, n - 1);
+        return LEVEL_NAME[Math.max(0, Math.min(idx, 2))];
+    }
+
+    /** Bila resolusi melebihi 1080p, turun ke stream berikutnya dan ingat pilihannya. */
+    private void checkRes() {
+        if (released || !playing || mp == null) return;
+        long w = -1, h = -1;
+        try {
+            Object tr = call(mp, "getCurrentVideoTrack");
+            if (tr != null) { w = lf(tr, "width"); h = lf(tr, "height"); }
+        } catch (Throwable ignored) {}
+        if (w <= 0 || h <= 0) {
+            if (++resTries < 5) ui.postDelayed(resCheck, 2000);
+            return;
+        }
+        if ((w > 1920 || h > 1088) && level < chain.length - 1) {
+            String from = levelName();
+            level++;
+            LEARNED.put(key, level);
+            StatsLog.log("   " + name + ": resolusi " + w + "x" + h + " > 1080p, turun dari " + from + " ke " + levelName());
+            try { mp.stop(); } catch (Exception ignored) {}
+            play();
         }
     }
 
@@ -140,7 +191,7 @@ public class VideoCell {
             }
             if (media != null) { try { media.getClass().getMethod("release").invoke(media); } catch (Throwable ignored) {} }
         } catch (Throwable t) { s.append("stats?"); }
-        s.append(" | macet+").append(stalls - pStalls).append(" sambung-ulang+").append(retries - pRetries);
+        s.append(" | stream=").append(levelName()).append(" | macet+").append(stalls - pStalls).append(" sambung-ulang+").append(retries - pRetries);
         pStalls = stalls; pRetries = retries;
         s.append(playing ? " | main" : " | TIDAK MAIN");
         return s.toString();
@@ -148,6 +199,7 @@ public class VideoCell {
 
     public void release() {
         released = true;
+        ui.removeCallbacks(resCheck);
         if (mp != null) {
             try { mp.stop(); } catch (Exception ignored) {}
             try { mp.detachViews(); } catch (Exception ignored) {}

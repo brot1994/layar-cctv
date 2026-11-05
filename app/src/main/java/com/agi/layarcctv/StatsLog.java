@@ -18,6 +18,9 @@ public final class StatsLog {
 
     private StatsLog() {}
 
+    static volatile Context appCtx;
+    static void log(String line) { if (appCtx != null) append(appCtx, line); }
+
     static File file(Context c) {
         File dir = c.getExternalFilesDir(null);
         if (dir == null) dir = c.getFilesDir();

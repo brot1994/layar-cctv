@@ -8,7 +8,8 @@ public class Camera {
     public String ip = "";
     public int port = 554;
     public int channel = 1;      // nomor kamera di DVR/NVR (kamera IP tunggal = 1)
-    public boolean sub = false;  // false = main stream (tajam), true = sub stream (ringan)
+    public boolean sub = false;  // true = sub stream (ringan); diturunkan dari quality
+    public String quality = "main"; // main (tajam) | mid (sedang, stream ke-3) | sub (ringan)
     public String user = "";     // kosong = pakai default
     public String pass = "";     // kosong = pakai default
     public String path = "";     // override path RTSP (opsional, untuk non-Hikvision)
@@ -19,7 +20,10 @@ public class Camera {
         c.ip = o.optString("ip", "");
         c.port = o.optInt("port", 554);
         c.channel = o.optInt("channel", 1);
-        c.sub = o.optBoolean("sub", false);
+        String q = o.optString("quality", "");
+        if (!q.equals("main") && !q.equals("mid") && !q.equals("sub")) q = o.optBoolean("sub", false) ? "sub" : "main";
+        c.quality = q;
+        c.sub = q.equals("sub");
         c.user = o.optString("user", "");
         c.pass = o.optString("pass", "");
         c.path = o.optString("path", "");
@@ -33,7 +37,8 @@ public class Camera {
             o.put("ip", ip);
             o.put("port", port);
             o.put("channel", channel);
-            o.put("sub", sub);
+            o.put("sub", quality.equals("sub"));
+            o.put("quality", quality);
             o.put("user", user);
             o.put("pass", pass);
             o.put("path", path);
@@ -53,7 +58,7 @@ public class Camera {
         if (path != null && !path.isEmpty()) {
             tail = path.startsWith("/") ? path : "/" + path;
         } else {
-            int code = channel * 100 + (sub ? 2 : 1); // Hikvision: 101=cam1 main, 102=cam1 sub
+            int code = channel * 100 + ("sub".equals(quality) ? 2 : "mid".equals(quality) ? 3 : 1); // 101 main, 102 sub, 103 stream ke-3
             tail = "/Streaming/Channels/" + code;
         }
         return "rtsp://" + auth + ip + ":" + port + tail;

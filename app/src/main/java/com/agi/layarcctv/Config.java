@@ -94,7 +94,7 @@ public class Config {
 
     private static Camera cam(String name, String ip, int ch, boolean sub) {
         Camera c = new Camera();
-        c.name = name; c.ip = ip; c.channel = ch; c.sub = sub;
+        c.name = name; c.ip = ip; c.channel = ch; c.sub = sub; c.quality = sub ? "sub" : "main";
         return c;
     }
 }

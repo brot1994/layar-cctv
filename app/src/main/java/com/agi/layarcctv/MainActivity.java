@@ -623,7 +623,7 @@ public class MainActivity extends Activity {
         final Config pc = cctvCfg;
         Camera src = pc.cameras.get(camIdx);
         Camera cam = Camera.fromJson(src.toJson());
-        if (cam.path == null || cam.path.isEmpty()) cam.sub = false; // layar penuh = main stream
+        if (cam.path == null || cam.path.isEmpty()) cam.quality = "main"; // layar penuh = main stream
 
         // hentikan semua kotak, lalu gambar satu kotak penuh
         releaseCells();

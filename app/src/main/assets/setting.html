@@ -49,6 +49,7 @@ small{color:#6b7280}
 <div class="card now">
   <div class="t">Sekarang tampil: <b id="nowTitle">-</b> <span id="nowState"></span></div>
   <div class="ctl">
+    <button class="mv" onclick="ctl('unfull')">Kecilkan kamera</button>
     <button class="mv" onclick="ctl('prev')">&#9664; Sebelumnya</button>
     <button class="mv" id="btnPause" onclick="togglePause()">&#10074;&#10074; Jeda</button>
     <button class="mv" onclick="ctl('next')">Berikutnya &#9654;</button>
@@ -186,6 +187,7 @@ function camCard(cam, pi, ci) {
     '<div class="row"><div>' + field('User (kosong = default)', 'user', cam.user || '') + '</div>' +
     '<div>' + field('Password (kosong = default)', 'pass', cam.pass || '') + '</div></div>' +
     '<div class="tools">' +
+    '<button class="mv" onclick="ctl(\'fullcam\',' + (pi * 100 + ci) + ')">&#9974; Layar penuh di TV</button>' +
     '<button class="mv" onclick="mvCam(' + pi + ',' + ci + ',-1)">&#8593; naik</button>' +
     '<button class="mv" onclick="mvCam(' + pi + ',' + ci + ',1)">&#8595; turun</button>' +
     '<button class="del" onclick="rmCam(' + pi + ',' + ci + ')">hapus</button></div>';

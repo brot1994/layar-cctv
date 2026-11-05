@@ -6,7 +6,11 @@ import android.net.http.SslError;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.graphics.drawable.GradientDrawable;
+import android.view.GestureDetector;
 import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -50,6 +54,15 @@ public class MainActivity extends Activity {
     private boolean hintDone = false;
     private boolean stopped = false; // true saat aplikasi di latar belakang (Home/screensaver/TV tidur)
     private final Runnable rotateTask = this::next;
+
+    // ---- layar penuh satu kamera ----
+    private static final long FULL_MS = 10 * 60 * 1000L; // kembali otomatis setelah 10 menit
+    private boolean fullActive = false;
+    private Config cctvCfg;                       // config halaman CCTV yang sedang tampil
+    private final List<View> cellBorders = new ArrayList<>();
+    private int selIdx = -1;                      // kotak yang disorot (navigasi remote)
+    private final Runnable exitFullTask = this::exitFull;
+    private final Runnable clearSelTask = () -> setSelection(-1);
 
     // ---- halaman web ----
     private WebView webView;
@@ -131,6 +144,11 @@ public class MainActivity extends Activity {
     private void advance(int dir) {
         ui.removeCallbacks(rotateTask);
         if (stopped) return;
+        if (fullActive) {
+            fullActive = false;
+            ui.removeCallbacks(exitFullTask);
+            screenShowing = false;
+        }
         int n = pages.size();
         if (n == 0) {
             clearScreen();
@@ -169,7 +187,7 @@ public class MainActivity extends Activity {
 
     private void scheduleNext() {
         ui.removeCallbacks(rotateTask);
-        if (paused || cur < 0 || cur >= pages.size()) return;
+        if (paused || fullActive || cur < 0 || cur >= pages.size()) return;
         int active = 0;
         for (Page p : pages) if (p.isActiveNow()) active++;
         long d = Math.max(5, pages.get(cur).duration) * 1000L;
@@ -194,6 +212,23 @@ public class MainActivity extends Activity {
                 paused = false;
                 scheduleNext();
                 break;
+            case "unfull":
+                exitFull();
+                break;
+            case "fullcam": {
+                int pi = idx / 100, ci = idx % 100;
+                if (pi >= 0 && pi < pages.size() && !pages.get(pi).isWeb()
+                        && ci < pages.get(pi).cameras.size()) {
+                    ui.removeCallbacks(rotateTask);
+                    if (pi != cur || fullActive) {
+                        fullActive = false;
+                        cur = pi;
+                        showPage(pages.get(cur));
+                    }
+                    enterFull(ci);
+                }
+                break;
+            }
             case "show":
                 if (idx >= 0 && idx < pages.size()) {
                     ui.removeCallbacks(rotateTask);
@@ -234,6 +269,7 @@ public class MainActivity extends Activity {
             if (pc.cameras.isEmpty()) {
                 showMessage("Halaman CCTV \"" + p.title() + "\" belum ada kamera.\n\nBuka  " + settingUrl());
             } else {
+                cctvCfg = pc;
                 List<VLCVideoLayout> videos = buildGrid(pc);
                 for (int i = 0; i < videos.size() && i < pc.cameras.size(); i++) {
                     Camera cam = pc.cameras.get(i);
@@ -254,6 +290,11 @@ public class MainActivity extends Activity {
     /** Hentikan semua pemutar/WebView dan kosongkan layar. */
     private void clearScreen() {
         screenShowing = false;
+        fullActive = false;
+        ui.removeCallbacks(exitFullTask);
+        ui.removeCallbacks(clearSelTask);
+        cellBorders.clear();
+        selIdx = -1;
         releaseCells();
         destroyWeb();
         root.removeAllViews();
@@ -532,6 +573,23 @@ public class MainActivity extends Activity {
         cell.addView(v, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+        // klik dobel = layar penuh; sorotan kotak untuk navigasi remote
+        final int idx = index;
+        final GestureDetector gd = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override public boolean onDown(MotionEvent e) { return true; }
+            @Override public boolean onDoubleTap(MotionEvent e) { enterFull(idx); return true; }
+        });
+        cell.setOnTouchListener((vw, ev) -> gd.onTouchEvent(ev));
+        View border = new View(this);
+        GradientDrawable gdw = new GradientDrawable();
+        gdw.setColor(Color.TRANSPARENT);
+        gdw.setStroke(6, Color.parseColor("#FFEB3B"));
+        border.setBackground(gdw);
+        border.setVisibility(View.GONE);
+        cell.addView(border, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        cellBorders.add(border);
+
         String name = "";
         if (index < c.cameras.size()) name = c.cameras.get(index).name;
         if (name != null && !name.isEmpty()) {
@@ -552,6 +610,112 @@ public class MainActivity extends Activity {
 
     private void setMargins(LinearLayout.LayoutParams p) {
         p.setMargins(gap, gap, gap, gap);
+    }
+
+    // ============================== layar penuh satu kamera ==============================
+
+    /** Tampilkan satu kamera memenuhi layar (stream main), kembali otomatis setelah 10 menit. */
+    private void enterFull(int camIdx) {
+        if (stopped || fullActive || cctvCfg == null) return;
+        if (camIdx < 0 || camIdx >= cctvCfg.cameras.size()) return;
+        final Config pc = cctvCfg;
+        Camera src = pc.cameras.get(camIdx);
+        Camera cam = Camera.fromJson(src.toJson());
+        if (cam.path == null || cam.path.isEmpty()) cam.sub = false; // layar penuh = main stream
+
+        // hentikan semua kotak, lalu gambar satu kotak penuh
+        releaseCells();
+        root.removeAllViews();
+        cellBorders.clear();
+        selIdx = -1;
+        ui.removeCallbacks(rotateTask);
+        ui.removeCallbacks(clearSelTask);
+
+        FrameLayout cell = new FrameLayout(this);
+        cell.setBackgroundColor(Color.BLACK);
+        VLCVideoLayout v = new VLCVideoLayout(this);
+        cell.addView(v, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        final GestureDetector gd = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override public boolean onDown(MotionEvent e) { return true; }
+            @Override public boolean onDoubleTap(MotionEvent e) { exitFull(); return true; }
+        });
+        cell.setOnTouchListener((vw, ev) -> gd.onTouchEvent(ev));
+        TextView label = new TextView(this);
+        label.setText(cam.name + "   (klik dobel / OK / Back untuk kembali)");
+        label.setTextColor(Color.WHITE);
+        label.setTextSize(13);
+        label.setPadding(10, 4, 10, 4);
+        label.setBackgroundColor(Color.parseColor("#99000000"));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.gravity = Gravity.BOTTOM | Gravity.START;
+        lp.setMargins(6, 6, 6, 6);
+        cell.addView(label, lp);
+        root.addView(cell, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        VideoCell vc = new VideoCell(libVLC, v, cam.url(pc), pc.networkCaching, ui);
+        cells.add(vc);
+        vc.start();
+
+        fullActive = true;
+        ui.removeCallbacks(exitFullTask);
+        ui.postDelayed(exitFullTask, FULL_MS);
+    }
+
+    /** Kembali ke grid halaman CCTV yang tadi, lalu lanjutkan rotasi. */
+    private void exitFull() {
+        if (!fullActive || stopped) return;
+        fullActive = false;
+        ui.removeCallbacks(exitFullTask);
+        if (cur >= 0 && cur < pages.size()) {
+            showPage(pages.get(cur));
+            scheduleNext();
+        } else {
+            advance(1);
+        }
+    }
+
+    /** Sorot satu kotak (navigasi dengan tombol panah remote); -1 = tanpa sorotan. */
+    private void setSelection(int idx) {
+        ui.removeCallbacks(clearSelTask);
+        for (int i = 0; i < cellBorders.size(); i++) {
+            cellBorders.get(i).setVisibility(i == idx ? View.VISIBLE : View.GONE);
+        }
+        selIdx = idx;
+        if (idx >= 0) ui.postDelayed(clearSelTask, 8000);
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (stopped) return super.onKeyDown(keyCode, event);
+        boolean enter = keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER
+                || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER;
+        if (fullActive) {
+            if (enter) { exitFull(); return true; }
+        } else if (!cellBorders.isEmpty()) {
+            int n = cellBorders.size();
+            if (enter) {
+                if (selIdx < 0) setSelection(0); else enterFull(selIdx);
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                setSelection(selIdx < 0 ? 0 : (selIdx + 1) % n);
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                setSelection(selIdx < 0 ? 0 : (selIdx - 1 + n) % n);
+                return true;
+            }
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (fullActive) { exitFull(); return; }
+        super.onBackPressed();
     }
 
     // ============================== overlay pesan & hint ==============================

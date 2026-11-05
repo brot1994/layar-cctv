@@ -290,10 +290,18 @@ public class MainActivity extends Activity {
             s.setLoadWithOverviewMode(true);
             s.setTextZoom(100);
             wv.setBackgroundColor(Color.BLACK);
+            android.util.DisplayMetrics dm0 = getResources().getDisplayMetrics();
+            final String hExpr;
+            if (p.viewWidth > 0) {
+                double sc0 = (dm0.widthPixels / (double) dm0.density) / p.viewWidth * (p.zoom > 0 ? p.zoom / 100.0 : 1.0);
+                hExpr = String.format(java.util.Locale.US, "%.1f", dm0.heightPixels / (double) dm0.density / sc0);
+            } else {
+                hExpr = "window.innerHeight";
+            }
             final String stretchJs = !p.stretch ? "" :
                 "(function(){if(window.__agiStretch)return;window.__agiStretch=1;"
               + "var busy=false;"
-              + "function f(){if(busy)return;busy=true;try{var H=document.documentElement.clientHeight,best=null,ba=0;"
+              + "function f(){if(busy)return;busy=true;try{var H=" + hExpr + ",best=null,ba=0;"
               + "var ts=document.getElementsByTagName('table');"
               + "for(var i=0;i<ts.length;i++){var r=ts[i].getBoundingClientRect();var a=r.width*r.height;"
               + "if(a>ba){ba=a;best=ts[i];}}"

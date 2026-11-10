@@ -328,6 +328,7 @@ public class MainActivity extends Activity {
                     Camera cam = pc.cameras.get(i);
                     VideoCell cell = new VideoCell(libVLC, videos.get(i), cam.chain(pc), cam.key(), !"none".equals(cam.maxRes), pc.networkCaching, ui);
                     cell.name = cam.name + " (" + cam.quality + ")";
+                    cell.display = cam.display;
                     cells.add(cell);
                     cell.start();
                 }
@@ -713,6 +714,7 @@ public class MainActivity extends Activity {
 
         VideoCell vc = new VideoCell(libVLC, v, cam.chain(pc), cam.key(), !"none".equals(cam.maxRes), pc.networkCaching, ui);
         vc.name = cam.name + " (" + cam.quality + ", layar penuh)";
+        vc.display = cam.display;
         cells.add(vc);
         vc.start();
 

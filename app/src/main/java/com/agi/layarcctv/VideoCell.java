@@ -30,6 +30,7 @@ public class VideoCell {
 
     // ---- statistik untuk log ----
     public String name = "";
+    public String display = "fit";        // fit | crop | stretch
     public volatile int stalls = 0;       // berapa kali buffering di tengah pemutaran
     public volatile int retries = 0;      // berapa kali stream putus lalu disambung ulang
     private boolean playing = false;
@@ -66,8 +67,11 @@ public class VideoCell {
                     StatsLog.log("   " + name + ": stream tidak tersedia, turun ke " + levelName());
                 }
                 scheduleRetry();
+            } else if (event.type == MediaPlayer.Event.Vout) {
+                applyScale();
             } else if (event.type == MediaPlayer.Event.Playing) {
                 playing = true;
+                applyScale();
                 if (limit) { resTries = 0; ui.removeCallbacks(resCheck); ui.postDelayed(resCheck, 3000); }
             } else if (event.type == MediaPlayer.Event.Buffering) {
                 float b = event.getBuffering();
@@ -92,6 +96,20 @@ public class VideoCell {
             mp.play();
         } catch (Exception e) {
             scheduleRetry();
+        }
+    }
+
+    /** Atur cara gambar mengisi kotak. Lewat refleksi agar aman bila nama enum beda di versi libVLC. */
+    private void applyScale() {
+        if (mp == null || released || "fit".equals(display)) return;
+        try {
+            Class<?> st = Class.forName("org.videolan.libvlc.MediaPlayer$ScaleType");
+            String want = "stretch".equals(display) ? "SURFACE_FILL" : "SURFACE_FIT_SCREEN";
+            Object val = null;
+            for (Object k : st.getEnumConstants()) if (k.toString().equals(want)) val = k;
+            if (val != null) mp.getClass().getMethod("setVideoScale", st).invoke(mp, val);
+        } catch (Throwable t) {
+            StatsLog.log("   " + name + ": gagal mengatur tampilan (" + t + ")");
         }
     }
 

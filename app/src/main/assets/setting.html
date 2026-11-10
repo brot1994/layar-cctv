@@ -225,6 +225,9 @@ function camCard(cam, pi, ci) {
     '<div><label>Stream</label><select data-k="quality"><option value="main">Main (tajam)</option>' +
     '<option value="mid">Sedang (stream ke-3)</option>' +
     '<option value="sub">Sub (ringan)</option></select></div></div>' +
+    '<label>Tampilan di kotak</label><select data-k="display"><option value="fit">Pas (ada pita hitam bila bentuk beda)</option>' +
+    '<option value="crop">Penuh, potong tepi (tanpa distorsi)</option>' +
+    '<option value="stretch">Penuh, regang (bisa melebar)</option></select>' +
     '<label>Batas resolusi</label><select data-k="maxRes"><option value="1080">Maks 1080p (otomatis turun bila lebih besar)</option>' +
     '<option value="none">Tanpa batas</option></select>' +
     '<div class="row"><div>' + field('User (kosong = default)', 'user', cam.user || '') + '</div>' +
@@ -235,6 +238,7 @@ function camCard(cam, pi, ci) {
     '<button class="mv" onclick="mvCam(' + pi + ',' + ci + ',1)">&#8595; turun</button>' +
     '<button class="del" onclick="rmCam(' + pi + ',' + ci + ')">hapus</button></div>';
   d.querySelector('[data-k="quality"]').value = cam.quality || (cam.sub ? 'sub' : 'main');
+  d.querySelector('[data-k="display"]').value = cam.display || 'fit';
   d.querySelector('[data-k="maxRes"]').value = (cam.maxRes === 'none') ? 'none' : '1080';
   return d;
 }

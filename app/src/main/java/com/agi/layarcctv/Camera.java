@@ -13,6 +13,7 @@ public class Camera {
     public String user = "";     // kosong = pakai default
     public String pass = "";     // kosong = pakai default
     public String path = "";     // override path RTSP (opsional, untuk non-Hikvision)
+    public String display = "fit"; // fit = pas (pita hitam) | crop = penuh, potong tepi | stretch = penuh, regang
     public String maxRes = "1080"; // "1080" = otomatis turun stream bila resolusi > 1080p; "none" = tanpa batas
 
     public static Camera fromJson(JSONObject o) {
@@ -28,6 +29,8 @@ public class Camera {
         c.user = o.optString("user", "");
         c.pass = o.optString("pass", "");
         c.path = o.optString("path", "");
+        String dsp = o.optString("display", "fit");
+        c.display = (dsp.equals("crop") || dsp.equals("stretch")) ? dsp : "fit";
         c.maxRes = "none".equals(o.optString("maxRes", "1080")) ? "none" : "1080";
         return c;
     }
@@ -45,6 +48,7 @@ public class Camera {
             o.put("pass", pass);
             o.put("path", path);
             o.put("maxRes", maxRes);
+            o.put("display", display);
         } catch (Exception ignored) {}
         return o;
     }

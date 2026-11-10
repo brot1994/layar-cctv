@@ -15,6 +15,7 @@ public class Config {
     public String defaultUser = "admin";
     public String defaultPass = "";
     public int networkCaching = 600; // ms, makin besar makin stabil tapi makin delay
+    public int restartHours = 3;     // restart otomatis aplikasi tiap N jam (0 = mati)
     public List<Page> pages = new ArrayList<>();
 
     // pandangan satu halaman CCTV (dipakai kode penggambar grid)
@@ -26,6 +27,7 @@ public class Config {
         c.defaultUser = o.optString("defaultUser", "admin");
         c.defaultPass = o.optString("defaultPass", "");
         c.networkCaching = o.optInt("networkCaching", 600);
+        c.restartHours = Math.max(0, o.optInt("restartHours", 3));
 
         JSONArray pa = o.optJSONArray("pages");
         if (pa != null) {
@@ -57,6 +59,7 @@ public class Config {
             o.put("defaultUser", defaultUser);
             o.put("defaultPass", defaultPass);
             o.put("networkCaching", networkCaching);
+            o.put("restartHours", restartHours);
             JSONArray arr = new JSONArray();
             for (Page p : pages) arr.put(p.toJson());
             o.put("pages", arr);

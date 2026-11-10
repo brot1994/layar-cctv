@@ -1,6 +1,7 @@
 package com.agi.layarcctv;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.graphics.Color;
 import android.net.http.SslError;
 import android.os.Bundle;
@@ -63,6 +64,32 @@ public class MainActivity extends Activity {
     private int selIdx = -1;                      // kotak yang disorot (navigasi remote)
     private final Runnable exitFullTask = this::exitFull;
     private final Runnable clearSelTask = () -> setSelection(-1);
+
+    // ---- restart otomatis ----
+    private final Runnable restartTask = this::doRestart;
+
+    private void scheduleRestart() {
+        ui.removeCallbacks(restartTask);
+        if (cfg != null && cfg.restartHours > 0) {
+            ui.postDelayed(restartTask, cfg.restartHours * 3600000L);
+        }
+    }
+
+    private void doRestart() {
+        if (stopped) { // aplikasi di latar belakang: tunda, jangan memaksa tampil
+            ui.postDelayed(restartTask, 10 * 60000L);
+            return;
+        }
+        StatsLog.log("=== RESTART OTOMATIS (tiap " + (cfg == null ? 0 : cfg.restartHours) + " jam) ===");
+        try {
+            Intent i = new Intent(this, RestartActivity.class);
+            i.putExtra("pid", android.os.Process.myPid());
+            startActivity(i);
+        } catch (Throwable t) {
+            StatsLog.log("restart gagal: " + t);
+            scheduleRestart();
+        }
+    }
 
     // ---- log kinerja ----
     private static final long LOG_EVERY = 10000L;
@@ -183,6 +210,7 @@ public class MainActivity extends Activity {
         ui.removeCallbacks(rotateTask);
         cfg = ConfigStore.load(this);
         pages = cfg.pages;
+        scheduleRestart();
         cur = -1;
         paused = false;
         screenShowing = false;

@@ -63,6 +63,9 @@ small{color:#6b7280}
   </div>
   <label>Buffer CCTV (ms) &mdash; besarkan bila patah-patah</label>
   <input id="nc" type="number" value="600">
+  <label>Restart otomatis aplikasi tiap (jam, 0 = mati)</label>
+  <input id="rh" type="number" value="3">
+  <small>Aplikasi menutup diri lalu menyala sendiri lagi (layar hitam sekitar 3 detik). Berguna bila TV lama-lama macet.</small>
   <small>Berlaku untuk semua halaman CCTV. Password di tiap kamera menimpa password default.</small>
 </div>
 
@@ -148,6 +151,7 @@ function render() {
   document.getElementById('du').value = CFG.defaultUser || '';
   document.getElementById('dp').value = CFG.defaultPass || '';
   document.getElementById('nc').value = CFG.networkCaching || 600;
+  document.getElementById('rh').value = (CFG.restartHours === undefined) ? 3 : CFG.restartHours;
   var box = document.getElementById('pages');
   box.innerHTML = '';
   CFG.pages.forEach(function(p, i){ box.appendChild(pageCard(p, i)); });
@@ -276,6 +280,7 @@ function collect() {
     defaultUser: document.getElementById('du').value,
     defaultPass: document.getElementById('dp').value,
     networkCaching: parseInt(document.getElementById('nc').value) || 600,
+    restartHours: Math.max(0, parseInt(document.getElementById('rh').value) || 0),
     pages: pages
   };
 }

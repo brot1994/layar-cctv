@@ -38,6 +38,14 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".RestartActivity"
+            android:process=":restart"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:screenOrientation="landscape" />
+
         <receiver
             android:name=".BootReceiver"
             android:exported="true">

@@ -3,7 +3,11 @@ package com.agi.layarcctv;
 import android.net.Uri;
 import android.os.Handler;
 
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.videolan.libvlc.LibVLC;
 import org.videolan.libvlc.Media;
@@ -24,6 +28,19 @@ public class VideoCell {
     private static final java.util.Map<String, Integer> LEARNED = new java.util.HashMap<>();
     private static final String[] LEVEL_NAME = {"main", "mid", "sub"};
     private final Runnable resCheck = this::checkRes;
+
+    /** Semua stop/release libVLC dilakukan di thread ini, supaya thread UI tidak pernah menunggu jaringan. */
+    private static final ExecutorService BG = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "vlc-bg");
+        t.setDaemon(true);
+        return t;
+    });
+    static void bg(Runnable r) { try { BG.execute(r); } catch (Throwable ignored) {} }
+
+    private static final java.util.Map<String, Long> LAST_PROBE = new java.util.HashMap<>();
+    private int failStreak = 0;
+    private long downSince = 0;
+    private long createdAt = 0;
     private final Handler ui;
     private MediaPlayer mp;
     private boolean released = false;
@@ -52,6 +69,7 @@ public class VideoCell {
     }
 
     public void start() {
+        createdAt = System.currentTimeMillis();
         mp = new MediaPlayer(lib);
         mp.attachViews(view, null, false, false);
         mp.setEventListener(event -> {
@@ -59,6 +77,9 @@ public class VideoCell {
                     || event.type == MediaPlayer.Event.EndReached) {
                 playing = false;
                 retries++;
+                failStreak++;
+                if (downSince == 0) downSince = System.currentTimeMillis();
+                probe();
                 // stream tingkat lebih rendah (mis. stream ke-3) mungkin tidak ada: cepat turun lagi
                 if (limit && level > 0 && level < chain.length - 1
                         && System.currentTimeMillis() - startedAt < 10000) {
@@ -71,6 +92,8 @@ public class VideoCell {
                 applyScale();
             } else if (event.type == MediaPlayer.Event.Playing) {
                 playing = true;
+                failStreak = 0;
+                downSince = 0;
                 applyScale();
                 if (limit) { resTries = 0; ui.removeCallbacks(resCheck); ui.postDelayed(resCheck, 3000); }
             } else if (event.type == MediaPlayer.Event.Buffering) {
@@ -137,18 +160,76 @@ public class VideoCell {
             level++;
             LEARNED.put(key, level);
             StatsLog.log("   " + name + ": resolusi " + w + "x" + h + " > 1080p, turun dari " + from + " ke " + levelName());
-            try { mp.stop(); } catch (Exception ignored) {}
-            play();
+            restartStream();
         }
+    }
+
+    /** stop() di thread latar, lalu play() lagi di thread UI. */
+    private void restartStream() {
+        final MediaPlayer m = mp;
+        if (m == null || released) return;
+        bg(() -> {
+            try { m.stop(); } catch (Throwable ignored) {}
+            ui.post(() -> { if (!released) play(); });
+        });
     }
 
     private void scheduleRetry() {
         if (released) return;
-        ui.postDelayed(() -> {
-            if (released) return;
-            try { mp.stop(); } catch (Exception ignored) {}
-            play();
-        }, 4000);
+        // jeda makin lama bila terus gagal: 4s, 8s, 16s, lalu 30s
+        long delay = Math.min(30000L, 4000L << Math.min(3, Math.max(0, failStreak - 1)));
+        ui.postDelayed(() -> { if (!released) restartStream(); }, delay);
+    }
+
+    /** Sudah berapa ms kotak ini tidak memutar video (0 bila sedang main). */
+    public long downForMs() {
+        if (playing) return 0;
+        long since = downSince > 0 ? downSince : createdAt;
+        return since == 0 ? 0 : System.currentTimeMillis() - since;
+    }
+
+    public String host() {
+        try { return Uri.parse(chain[0]).getHost(); } catch (Throwable t) { return ""; }
+    }
+
+    /** Saat gagal: uji sambungan TCP ke kamera/DVR dan catat hasilnya di log (maks. sekali per 30 detik per alamat). */
+    private void probe() {
+        final String host;
+        final int port;
+        try {
+            Uri u = Uri.parse(chain[Math.min(level, chain.length - 1)]);
+            host = u.getHost();
+            port = u.getPort() > 0 ? u.getPort() : 554;
+        } catch (Throwable t) { return; }
+        if (host == null) return;
+        final String k = host + ":" + port;
+        synchronized (LAST_PROBE) {
+            Long last = LAST_PROBE.get(k);
+            long now = System.currentTimeMillis();
+            if (last != null && now - last < 30000) return;
+            LAST_PROBE.put(k, now);
+        }
+        final String who = name;
+        Thread th = new Thread(() -> {
+            long t0 = System.currentTimeMillis();
+            Socket s = new Socket();
+            String res;
+            try {
+                s.connect(new InetSocketAddress(host, port), 3000);
+                res = "terhubung (" + (System.currentTimeMillis() - t0) + " ms)";
+            } catch (java.net.SocketTimeoutException e) {
+                res = "TIMEOUT 3 detik (tidak menjawab)";
+            } catch (java.net.ConnectException e) {
+                res = "DITOLAK / tidak terjangkau: " + e.getMessage();
+            } catch (Throwable e) {
+                res = "gagal: " + e;
+            } finally {
+                try { s.close(); } catch (Throwable ignored) {}
+            }
+            StatsLog.log("   [cek sambungan] " + k + " untuk " + who + " -> " + res);
+        }, "probe");
+        th.setDaemon(true);
+        th.start();
     }
 
     // ---- refleksi: aman bila versi libVLC beda; kalau gagal -> "?" ----
@@ -218,11 +299,15 @@ public class VideoCell {
     public void release() {
         released = true;
         ui.removeCallbacks(resCheck);
-        if (mp != null) {
-            try { mp.stop(); } catch (Exception ignored) {}
-            try { mp.detachViews(); } catch (Exception ignored) {}
-            try { mp.release(); } catch (Exception ignored) {}
-            mp = null;
+        final MediaPlayer m = mp;
+        mp = null;
+        if (m != null) {
+            try { m.setEventListener(null); } catch (Throwable ignored) {}
+            try { m.detachViews(); } catch (Throwable ignored) {}
+            bg(() -> {
+                try { m.stop(); } catch (Throwable ignored) {}
+                try { m.release(); } catch (Throwable ignored) {}
+            });
         }
     }
 }

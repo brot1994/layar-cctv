@@ -53,7 +53,7 @@ public class MainActivity extends Activity {
     private volatile boolean paused = false;
     private boolean screenShowing = false;
     private boolean hintDone = false;
-    private boolean stopped = false; // true saat aplikasi di latar belakang (Home/screensaver/TV tidur)
+    private volatile boolean stopped = false; // true saat aplikasi di latar belakang (Home/screensaver/TV tidur)
     private final Runnable rotateTask = this::next;
 
     // ---- layar penuh satu kamera ----
@@ -75,20 +75,93 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** Matikan proses ini lalu nyalakan lagi (lewat proses pembantu). Boleh dipanggil dari thread mana pun. */
+    private void relaunchProcess(String why) {
+        StatsLog.log("=== RESTART: " + why + " ===");
+        try {
+            Intent i = new Intent(getApplicationContext(), RestartActivity.class);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            i.putExtra("pid", android.os.Process.myPid());
+            getApplicationContext().startActivity(i);
+        } catch (Throwable t) {
+            StatsLog.log("restart gagal: " + t);
+        }
+    }
+
+    // ---- watchdog: bila thread UI macet, restart sendiri ----
+    private volatile long beat = System.currentTimeMillis();
+    private final Runnable beatTask = new Runnable() {
+        @Override public void run() {
+            beat = System.currentTimeMillis();
+            ui.postDelayed(this, 5000);
+        }
+    };
+
+    private void startWatchdog() {
+        beat = System.currentTimeMillis();
+        ui.post(beatTask);
+        Thread t = new Thread(() -> {
+            while (true) {
+                try { Thread.sleep(20000); } catch (InterruptedException e) { return; }
+                if (!stopped && System.currentTimeMillis() - beat > 90000) {
+                    relaunchProcess("WATCHDOG: aplikasi tidak merespons > 90 detik");
+                    beat = System.currentTimeMillis(); // beri waktu sebelum dicek lagi
+                }
+            }
+        }, "watchdog");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    // ---- pemulih: beberapa kamera satu alamat mati lama -> mulai ulang libVLC ----
+    private long lastRecover = 0;
+    private int recoverCount = 0;
+    private long recoverWindowStart = 0;
+
+    private void checkRecover() {
+        if (stopped || cells.size() < 2 || fullActive) return;
+        long now = System.currentTimeMillis();
+        java.util.Map<String, Integer> downByHost = new java.util.HashMap<>();
+        for (VideoCell c : cells) {
+            if (c.downForMs() >= 120000) {
+                String h = c.host();
+                downByHost.put(h, downByHost.containsKey(h) ? downByHost.get(h) + 1 : 1);
+            }
+        }
+        boolean bad = false;
+        for (int n : downByHost.values()) if (n >= 2) bad = true;
+        if (!bad || now - lastRecover < 240000) return;
+
+        if (now - recoverWindowStart > 20 * 60000L) { recoverWindowStart = now; recoverCount = 0; }
+        lastRecover = now;
+        recoverCount++;
+        if (recoverCount >= 3) {
+            android.content.SharedPreferences sp = getSharedPreferences("recover", MODE_PRIVATE);
+            long lastProc = sp.getLong("lastProc", 0);
+            if (now - lastProc > 30 * 60000L) {
+                sp.edit().putLong("lastProc", now).apply();
+                relaunchProcess("PEMULIH: kamera tetap mati setelah 3x pemulihan");
+                return;
+            }
+        }
+        StatsLog.log("=== PEMULIH: beberapa kamera mati > 2 menit, libVLC dimulai ulang (ke-" + recoverCount + ") ===");
+        try {
+            final LibVLC old = libVLC;
+            clearScreen();
+            libVLC = newLibVLC();
+            VideoCell.bg(() -> { try { old.release(); } catch (Throwable ignored) {} });
+            if (cur >= 0 && cur < pages.size()) showPage(pages.get(cur));
+        } catch (Throwable t) {
+            StatsLog.log("pemulih gagal: " + t);
+        }
+    }
+
     private void doRestart() {
         if (stopped) { // aplikasi di latar belakang: tunda, jangan memaksa tampil
             ui.postDelayed(restartTask, 10 * 60000L);
             return;
         }
-        StatsLog.log("=== RESTART OTOMATIS (tiap " + (cfg == null ? 0 : cfg.restartHours) + " jam) ===");
-        try {
-            Intent i = new Intent(this, RestartActivity.class);
-            i.putExtra("pid", android.os.Process.myPid());
-            startActivity(i);
-        } catch (Throwable t) {
-            StatsLog.log("restart gagal: " + t);
-            scheduleRestart();
-        }
+        relaunchProcess("RESTART OTOMATIS (tiap " + (cfg == null ? 0 : cfg.restartHours) + " jam)");
     }
 
     // ---- log kinerja ----
@@ -128,16 +201,12 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(Color.BLACK);
         setContentView(root);
 
-        ArrayList<String> opts = new ArrayList<>();
-        opts.add("--rtsp-tcp");
-        opts.add("--network-caching=600");
-        opts.add("--no-audio");
-        opts.add("--avcodec-hw=any");
-        libVLC = new LibVLC(this, opts);
+        libVLC = newLibVLC();
 
         startWeb();
         StatsLog.appCtx = getApplicationContext();
         logHeader();
+        startWatchdog();
         startRotation();
         ui.postDelayed(logTask, LOG_EVERY);
     }
@@ -181,6 +250,16 @@ public class MainActivity extends Activity {
         } catch (Throwable ignored) {}
         StatsLog.append(this, "[" + title + "] " + sys);
         for (VideoCell c : new ArrayList<>(cells)) StatsLog.append(this, "   " + c.snapshot());
+        checkRecover();
+    }
+
+    private LibVLC newLibVLC() {
+        ArrayList<String> opts = new ArrayList<>();
+        opts.add("--rtsp-tcp");
+        opts.add("--network-caching=600");
+        opts.add("--no-audio");
+        opts.add("--avcodec-hw=any");
+        return new LibVLC(this, opts);
     }
 
     private void startWeb() {

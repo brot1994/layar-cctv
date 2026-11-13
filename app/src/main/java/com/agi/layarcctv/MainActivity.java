@@ -204,7 +204,7 @@ public class MainActivity extends Activity {
         if (!bad.isEmpty() && !fullActive) {
             for (int i = 0; i < bad.size(); i += 2) {
                 final List<VideoCell> batch = new ArrayList<>(bad.subList(i, Math.min(i + 2, bad.size())));
-                ui.post(() -> { for (VideoCell c : batch) c.setForceSw(true); });
+                onUi(() -> { for (VideoCell c : batch) c.setForceSw(true); return Boolean.TRUE; }); // tunggu sampai benar-benar diganti
                 long t0 = System.currentTimeMillis();
                 boolean allUp = false;
                 while (System.currentTimeMillis() - t0 < 12000) {
@@ -214,10 +214,10 @@ public class MainActivity extends Activity {
                     try { Thread.sleep(300); } catch (InterruptedException e) { break; }
                 }
                 try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
-                List<VideoCell> still = copyAll(batch, 3, bmp[0]);
+                List<VideoCell> still = copyAll(batch, 6, bmp[0]);
                 StatsLog.log("foto layar: putaran " + (i / 2 + 2) + " (dekoder lunak sementara): " + (batch.size() - still.size())
                         + "/" + batch.size() + " tampil" + (allUp ? "" : " [stream belum siap]"));
-                ui.post(() -> { for (VideoCell c : batch) c.setForceSw(false); });
+                onUi(() -> { for (VideoCell c : batch) c.setForceSw(false); return Boolean.TRUE; });
             }
         }
         try {

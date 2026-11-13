@@ -51,6 +51,8 @@ public class VideoCell {
     public volatile int stalls = 0;       // berapa kali buffering di tengah pemutaran
     public volatile int retries = 0;      // berapa kali stream putus lalu disambung ulang
     private volatile boolean playing = false;
+    public Camera cam;      // untuk foto langsung dari kamera
+    public Config pcfg;
     public volatile boolean baseSw = false;   // dekoder lunak untuk semua kotak (pengaturan)
     private volatile boolean forceSw = false;  // sementara lunak, untuk foto layar
     private volatile long lastSwap = 0;

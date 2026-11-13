@@ -201,24 +201,62 @@ public class MainActivity extends Activity {
         final List<VideoCell> all = onUi(() -> new ArrayList<>(cells));
         List<VideoCell> bad = copyAll(all, 1, bmp[0]);
         StatsLog.log("foto layar: putaran 1 selesai, " + (all.size() - bad.size()) + " kotak langsung tampil, " + bad.size() + " hitam");
-        if (!bad.isEmpty() && !fullActive) {
-            for (int i = 0; i < bad.size(); i += 2) {
-                final List<VideoCell> batch = new ArrayList<>(bad.subList(i, Math.min(i + 2, bad.size())));
-                onUi(() -> { for (VideoCell c : batch) c.setForceSw(true); return Boolean.TRUE; }); // tunggu sampai benar-benar diganti
-                long t0 = System.currentTimeMillis();
-                boolean allUp = false;
-                while (System.currentTimeMillis() - t0 < 12000) {
-                    allUp = true;
-                    for (VideoCell c : batch) if (!c.readyAfterSwap()) allUp = false;
-                    if (allUp) break;
-                    try { Thread.sleep(300); } catch (InterruptedException e) { break; }
-                }
-                try { Thread.sleep(800); } catch (InterruptedException ignored) {}
-                List<VideoCell> still = copyAll(batch, 6, bmp[0]);
-                StatsLog.log("foto layar: putaran " + (i / 2 + 2) + " (dekoder lunak sementara): " + (batch.size() - still.size())
-                        + "/" + batch.size() + " tampil" + (allUp ? "" : " [stream belum siap]"));
-                onUi(() -> { for (VideoCell c : batch) c.setForceSw(false); return Boolean.TRUE; });
+        if (!bad.isEmpty()) {
+            // Kotak yang hitam: ambil foto langsung dari kamera/DVR (ISAPI) dan tempel di kotaknya.
+            final List<VideoCell> toSnap = new ArrayList<>(bad);
+            final android.graphics.Bitmap[] snaps = new android.graphics.Bitmap[toSnap.size()];
+            Thread[] ths = new Thread[toSnap.size()];
+            for (int i = 0; i < toSnap.size(); i++) {
+                final int k = i;
+                final VideoCell c = toSnap.get(i);
+                ths[i] = new Thread(() -> {
+                    if (c.cam != null && c.pcfg != null) snaps[k] = Snap.fetch(c.cam, c.pcfg);
+                }, "snap" + i);
+                ths[i].setDaemon(true);
+                ths[i].start();
             }
+            for (Thread t : ths) { try { t.join(12000); } catch (InterruptedException ignored) {} }
+            final int[][] rects = onUi(() -> {
+                int[][] r = new int[toSnap.size()][];
+                for (int i = 0; i < toSnap.size(); i++) {
+                    java.util.List<android.view.SurfaceView> one = new ArrayList<>();
+                    collectSurfaces(toSnap.get(i).layout(), one);
+                    if (one.isEmpty()) continue;
+                    android.view.SurfaceView sv = one.get(0);
+                    int[] loc = new int[2];
+                    sv.getLocationInWindow(loc);
+                    r[i] = new int[] { loc[0], loc[1], sv.getWidth(), sv.getHeight() };
+                }
+                return r;
+            });
+            int ok = 0;
+            if (rects != null) {
+                android.graphics.Canvas cv = new android.graphics.Canvas(bmp[0]);
+                android.graphics.Paint black = new android.graphics.Paint();
+                black.setColor(Color.BLACK);
+                android.graphics.Paint bp = new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG);
+                for (int i = 0; i < toSnap.size(); i++) {
+                    android.graphics.Bitmap sb = snaps[i];
+                    int[] r = rects[i];
+                    if (sb == null || r == null || r[2] <= 0 || r[3] <= 0) continue;
+                    cv.drawRect(r[0], r[1], r[0] + r[2], r[1] + r[3], black);
+                    String mode = toSnap.get(i).cam != null ? toSnap.get(i).cam.display : "fit";
+                    android.graphics.Rect src = new android.graphics.Rect(0, 0, sb.getWidth(), sb.getHeight());
+                    android.graphics.Rect dst = new android.graphics.Rect(r[0], r[1], r[0] + r[2], r[1] + r[3]);
+                    float sa = sb.getWidth() / (float) sb.getHeight(), da = r[2] / (float) r[3];
+                    if ("crop".equals(mode)) {
+                        if (sa > da) { int w = Math.round(sb.getHeight() * da); src.left = (sb.getWidth() - w) / 2; src.right = src.left + w; }
+                        else { int h = Math.round(sb.getWidth() / da); src.top = (sb.getHeight() - h) / 2; src.bottom = src.top + h; }
+                    } else if (!"stretch".equals(mode)) {
+                        if (sa > da) { int h = Math.round(r[2] / sa); dst.top = r[1] + (r[3] - h) / 2; dst.bottom = dst.top + h; }
+                        else { int w = Math.round(r[3] * sa); dst.left = r[0] + (r[2] - w) / 2; dst.right = dst.left + w; }
+                    }
+                    cv.drawBitmap(sb, src, dst, bp);
+                    ok++;
+                }
+            }
+            for (android.graphics.Bitmap sb : snaps) if (sb != null) sb.recycle();
+            StatsLog.log("foto layar: foto langsung dari kamera berhasil " + ok + " dari " + toSnap.size() + " kotak hitam");
         }
         try {
             android.graphics.Bitmap b = bmp[0];
@@ -780,6 +818,8 @@ public class MainActivity extends Activity {
                     cell.name = cam.name + " (" + cam.quality + ")";
                     cell.display = cam.display;
                     cell.baseSw = "sw".equals(cfg.decoder);
+                    cell.cam = cam;
+                    cell.pcfg = pc;
                     cells.add(cell);
                     cell.start();
                 }
@@ -1167,6 +1207,8 @@ public class MainActivity extends Activity {
         vc.name = cam.name + " (" + cam.quality + ", layar penuh)";
         vc.display = cam.display;
         vc.baseSw = cfg != null && "sw".equals(cfg.decoder);
+        vc.cam = cam;
+        vc.pcfg = pc;
         cells.add(vc);
         vc.start();
 

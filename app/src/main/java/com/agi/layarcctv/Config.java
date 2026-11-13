@@ -17,6 +17,9 @@ public class Config {
     public int networkCaching = 600; // ms, makin besar makin stabil tapi makin delay
     public int restartHours = 3;     // restart otomatis aplikasi tiap N jam (0 = mati)
     public String shotPass = "";    // password foto layar (kosong = fitur mati)
+    public String tgToken = "";    // token bot Telegram (kosong = kirim otomatis mati)
+    public String tgChat = "";     // ID chat tujuan
+    public int tgEveryMin = 60;      // kirim foto layar tiap N menit
     public boolean tsWatch = true;   // cek Tailscale tiap jam, nyalakan bila mati
     public List<Page> pages = new ArrayList<>();
 
@@ -32,6 +35,9 @@ public class Config {
         c.restartHours = Math.max(0, o.optInt("restartHours", 3));
         c.shotPass = o.optString("shotPass", "");
         c.tsWatch = o.optBoolean("tsWatch", true);
+        c.tgToken = o.optString("tgToken", "").trim();
+        c.tgChat = o.optString("tgChat", "").trim();
+        c.tgEveryMin = Math.max(5, o.optInt("tgEveryMin", 60));
 
         JSONArray pa = o.optJSONArray("pages");
         if (pa != null) {
@@ -66,6 +72,9 @@ public class Config {
             o.put("restartHours", restartHours);
             o.put("shotPass", shotPass);
             o.put("tsWatch", tsWatch);
+            o.put("tgToken", tgToken);
+            o.put("tgChat", tgChat);
+            o.put("tgEveryMin", tgEveryMin);
             JSONArray arr = new JSONArray();
             for (Page p : pages) arr.put(p.toJson());
             o.put("pages", arr);

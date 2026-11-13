@@ -259,6 +259,93 @@ public class MainActivity extends Activity {
         }
     }
 
+    // ---- kirim foto layar ke Telegram ----
+    private final java.util.concurrent.atomic.AtomicBoolean tgBusy = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    /** Dicek tiap menit; kirim bila sudah lewat interval sejak kiriman terakhir (disimpan, jadi tahan restart). */
+    private final Runnable tgTask = new Runnable() {
+        @Override public void run() {
+            try {
+                if (cfg != null && !cfg.tgToken.isEmpty() && !cfg.tgChat.isEmpty() && !stopped) {
+                    android.content.SharedPreferences sp = getSharedPreferences("tg", MODE_PRIVATE);
+                    long last = sp.getLong("last", 0);
+                    if (System.currentTimeMillis() - last >= cfg.tgEveryMin * 60000L) sendTelegramAsync(false);
+                }
+            } catch (Throwable t) { StatsLog.log("[Telegram] error: " + t); }
+            ui.postDelayed(this, 60000L);
+        }
+    };
+
+    private void sendTelegramAsync(final boolean manual) {
+        final Config c = cfg;
+        if (c == null || c.tgToken.isEmpty() || c.tgChat.isEmpty()) {
+            if (manual) StatsLog.log("[Telegram] token/ID chat belum diisi");
+            return;
+        }
+        if (!tgBusy.compareAndSet(false, true)) return;
+        Thread t = new Thread(() -> {
+            try {
+                byte[] jpg = takeShot();
+                if (jpg == null) { StatsLog.log("[Telegram] batal: foto layar gagal/aplikasi tidak tampil"); return; }
+                String cap = "Layar TV " + new java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.US).format(new java.util.Date())
+                        + (manual ? " (manual)" : "");
+                String err = postTelegram(c.tgToken, c.tgChat, cap, jpg);
+                if (err == null) {
+                    getSharedPreferences("tg", MODE_PRIVATE).edit().putLong("last", System.currentTimeMillis()).apply();
+                    StatsLog.log("[Telegram] foto terkirim (" + (jpg.length / 1024) + " KB)");
+                } else {
+                    StatsLog.log("[Telegram] GAGAL kirim: " + err);
+                }
+            } catch (Throwable e) {
+                StatsLog.log("[Telegram] error: " + e);
+            } finally {
+                tgBusy.set(false);
+            }
+        }, "telegram");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** Kirim foto lewat Bot API. Mengembalikan null bila sukses, selain itu pesan kesalahan. */
+    private static String postTelegram(String token, String chat, String caption, byte[] jpg) {
+        java.net.HttpURLConnection con = null;
+        try {
+            String boundary = "----agi" + System.currentTimeMillis();
+            con = (java.net.HttpURLConnection) new java.net.URL("https://api.telegram.org/bot" + token + "/sendPhoto").openConnection();
+            con.setConnectTimeout(15000);
+            con.setReadTimeout(30000);
+            con.setDoOutput(true);
+            con.setRequestMethod("POST");
+            con.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+            java.io.OutputStream os = con.getOutputStream();
+            String nl = "\r\n";
+            String[][] f = { { "chat_id", chat }, { "caption", caption } };
+            for (String[] kv : f) {
+                os.write(("--" + boundary + nl + "Content-Disposition: form-data; name=\"" + kv[0] + "\"" + nl + nl + kv[1] + nl).getBytes("UTF-8"));
+            }
+            os.write(("--" + boundary + nl + "Content-Disposition: form-data; name=\"photo\"; filename=\"layar.jpg\"" + nl
+                    + "Content-Type: image/jpeg" + nl + nl).getBytes("UTF-8"));
+            os.write(jpg);
+            os.write((nl + "--" + boundary + "--" + nl).getBytes("UTF-8"));
+            os.flush();
+            int code = con.getResponseCode();
+            if (code == 200) return null;
+            java.io.InputStream es = con.getErrorStream();
+            String body = "";
+            if (es != null) {
+                java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[1024]; int n;
+                while ((n = es.read(buf)) != -1 && bo.size() < 2000) bo.write(buf, 0, n);
+                body = bo.toString("UTF-8");
+            }
+            return "HTTP " + code + " " + body;
+        } catch (Throwable e) {
+            return e.toString();
+        } finally {
+            if (con != null) con.disconnect();
+        }
+    }
+
     // ---- pengawas Tailscale (tiap jam) ----
     private static final String TS_PKG = "com.tailscale.ipn";
     private boolean tsMissingLogged = false;
@@ -346,6 +433,7 @@ public class MainActivity extends Activity {
     private final WebServer.Controller controller = new WebServer.Controller() {
         @Override public void onConfigChanged() { ui.post(MainActivity.this::startRotation); }
         @Override public String control(String cmd, int index) {
+            if ("tg".equals(cmd)) { sendTelegramAsync(true); return statusJson(); }
             final String c = cmd;
             final int i = index;
             ui.post(() -> doControl(c, i));
@@ -374,6 +462,7 @@ public class MainActivity extends Activity {
         startRotation();
         ui.postDelayed(logTask, LOG_EVERY);
         ui.postDelayed(tsTask, 60000L);
+        ui.postDelayed(tgTask, 120000L);
     }
 
     private void logHeader() {

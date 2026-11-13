@@ -171,6 +171,8 @@ public class MainActivity extends Activity {
         final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
         final int[] result = { -1 };
         final android.graphics.Bitmap[] bmp = { null };
+        final java.util.List<android.view.SurfaceView> svs = new ArrayList<>();
+        final java.util.concurrent.CountDownLatch svLatch = new java.util.concurrent.CountDownLatch(1);
         ui.post(() -> {
             try {
                 View d = getWindow().getDecorView();
@@ -190,6 +192,47 @@ public class MainActivity extends Activity {
             StatsLog.log("foto layar: PixelCopy kode " + result[0]);
             return null;
         }
+        // Video (SurfaceView) sering hitam pada salinan jendela -> salin tiap SurfaceView sendiri lalu tempel.
+        final int[] okCount = { 0 }, failCount = { 0 };
+        ui.post(() -> {
+            try {
+                collectSurfaces(root, svs);
+                if (svs.isEmpty()) { svLatch.countDown(); return; }
+                final int[] left = { svs.size() };
+                for (final android.view.SurfaceView sv : svs) {
+                    final int sw = sv.getWidth(), sh = sv.getHeight();
+                    if (sw <= 0 || sh <= 0 || !sv.getHolder().getSurface().isValid()) {
+                        failCount[0]++;
+                        if (--left[0] == 0) svLatch.countDown();
+                        continue;
+                    }
+                    final android.graphics.Bitmap sb = android.graphics.Bitmap.createBitmap(sw, sh, android.graphics.Bitmap.Config.ARGB_8888);
+                    final int[] loc = new int[2];
+                    sv.getLocationInWindow(loc);
+                    try {
+                        android.view.PixelCopy.request(sv, sb, code -> {
+                            if (code == android.view.PixelCopy.SUCCESS) {
+                                new android.graphics.Canvas(bmp[0]).drawBitmap(sb, loc[0], loc[1], null);
+                                okCount[0]++;
+                            } else {
+                                failCount[0]++;
+                                if (failCount[0] == 1) StatsLog.log("foto layar: salin video kode " + code);
+                            }
+                            sb.recycle();
+                            if (--left[0] == 0) svLatch.countDown();
+                        }, ui);
+                    } catch (Throwable t) {
+                        failCount[0]++;
+                        if (--left[0] == 0) svLatch.countDown();
+                    }
+                }
+            } catch (Throwable t) {
+                StatsLog.log("foto layar (video) gagal: " + t);
+                svLatch.countDown();
+            }
+        });
+        try { svLatch.await(8, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+        StatsLog.log("foto layar: video tersalin " + okCount[0] + ", gagal " + failCount[0]);
         try {
             android.graphics.Bitmap b = bmp[0];
             if (b.getWidth() > 1280) {
@@ -205,6 +248,14 @@ public class MainActivity extends Activity {
         } catch (Throwable t) {
             StatsLog.log("foto layar gagal (kompres): " + t);
             return null;
+        }
+    }
+
+    private void collectSurfaces(View v, java.util.List<android.view.SurfaceView> out) {
+        if (v instanceof android.view.SurfaceView) out.add((android.view.SurfaceView) v);
+        else if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) collectSurfaces(g.getChildAt(i), out);
         }
     }
 

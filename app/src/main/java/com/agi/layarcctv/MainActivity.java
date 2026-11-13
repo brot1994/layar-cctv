@@ -166,13 +166,17 @@ public class MainActivity extends Activity {
 
     // ---- foto layar ----
     /** Dipanggil dari thread server. Mengambil seluruh jendela (termasuk video) lewat PixelCopy. */
+    private final Object shotLock = new Object();
+
     private byte[] takeShot() {
+        synchronized (shotLock) { return takeShotInner(); }
+    }
+
+    private byte[] takeShotInner() {
         if (stopped || android.os.Build.VERSION.SDK_INT < 26) return null;
         final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
         final int[] result = { -1 };
         final android.graphics.Bitmap[] bmp = { null };
-        final java.util.List<android.view.SurfaceView> svs = new ArrayList<>();
-        final java.util.concurrent.CountDownLatch svLatch = new java.util.concurrent.CountDownLatch(1);
         ui.post(() -> {
             try {
                 View d = getWindow().getDecorView();
@@ -192,29 +196,30 @@ public class MainActivity extends Activity {
             StatsLog.log("foto layar: PixelCopy kode " + result[0]);
             return null;
         }
-        // Video (SurfaceView) sering hitam pada salinan jendela -> salin tiap SurfaceView sendiri lalu tempel.
-        // Salinan yang hitam diulang sampai 4x (jeda 600 ms).
-        final int[] okCount = { 0 }, failCount = { 0 };
-        ui.post(() -> {
-            try {
-                collectSurfaces(root, svs);
-                if (svs.isEmpty()) { svLatch.countDown(); return; }
-                final int[] left = { svs.size() };
-                for (int i = 0; i < svs.size(); i++) {
-                    final int idx = i;
-                    final android.view.SurfaceView sv = svs.get(i);
-                    copySurface(sv, idx, 4, bmp[0], ok -> {
-                        if (ok) okCount[0]++; else failCount[0]++;
-                        if (--left[0] == 0) svLatch.countDown();
-                    });
+        // Video (SurfaceView) pada dekoder keras sering hitam. Salin tiap kotak sendiri; yang hitam
+        // diganti sementara ke dekoder lunak (2 kotak per putaran), disalin, lalu dikembalikan.
+        final List<VideoCell> all = onUi(() -> new ArrayList<>(cells));
+        List<VideoCell> bad = copyAll(all, 1, bmp[0]);
+        StatsLog.log("foto layar: putaran 1 selesai, " + (all.size() - bad.size()) + " kotak langsung tampil, " + bad.size() + " hitam");
+        if (!bad.isEmpty() && !fullActive) {
+            for (int i = 0; i < bad.size(); i += 2) {
+                final List<VideoCell> batch = new ArrayList<>(bad.subList(i, Math.min(i + 2, bad.size())));
+                ui.post(() -> { for (VideoCell c : batch) c.setForceSw(true); });
+                long t0 = System.currentTimeMillis();
+                boolean allUp = false;
+                while (System.currentTimeMillis() - t0 < 12000) {
+                    allUp = true;
+                    for (VideoCell c : batch) if (!c.isPlayingNow()) allUp = false;
+                    if (allUp) break;
+                    try { Thread.sleep(300); } catch (InterruptedException e) { break; }
                 }
-            } catch (Throwable t) {
-                StatsLog.log("foto layar (video) gagal: " + t);
-                svLatch.countDown();
+                try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
+                List<VideoCell> still = copyAll(batch, 3, bmp[0]);
+                StatsLog.log("foto layar: putaran " + (i / 2 + 2) + " (dekoder lunak sementara): " + (batch.size() - still.size())
+                        + "/" + batch.size() + " tampil" + (allUp ? "" : " [stream belum siap]"));
+                ui.post(() -> { for (VideoCell c : batch) c.setForceSw(false); });
             }
-        });
-        try { svLatch.await(15, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
-        StatsLog.log("foto layar: video tersalin " + okCount[0] + ", gagal " + failCount[0]);
+        }
         try {
             android.graphics.Bitmap b = bmp[0];
             if (b.getWidth() > 1280) {
@@ -234,6 +239,47 @@ public class MainActivity extends Activity {
     }
 
     private interface Done { void done(boolean ok); }
+
+    /** Jalankan di thread UI dan tunggu hasilnya. */
+    private <T> T onUi(final java.util.concurrent.Callable<T> job) {
+        final Object[] out = { null };
+        final java.util.concurrent.CountDownLatch l = new java.util.concurrent.CountDownLatch(1);
+        ui.post(() -> { try { out[0] = job.call(); } catch (Throwable ignored) {} l.countDown(); });
+        try { l.await(5, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+        @SuppressWarnings("unchecked") T r = (T) out[0];
+        return r;
+    }
+
+    /** Salin kotak-kotak ke bitmap. Mengembalikan daftar kotak yang gagal/hitam. */
+    private List<VideoCell> copyAll(final List<VideoCell> list, final int tries, final android.graphics.Bitmap dst) {
+        final List<VideoCell> failed = java.util.Collections.synchronizedList(new ArrayList<VideoCell>());
+        if (list == null || list.isEmpty()) return failed;
+        final java.util.concurrent.CountDownLatch l = new java.util.concurrent.CountDownLatch(1);
+        ui.post(() -> {
+            try {
+                final int[] left = { list.size() };
+                for (int i = 0; i < list.size(); i++) {
+                    final VideoCell c = list.get(i);
+                    java.util.List<android.view.SurfaceView> one = new ArrayList<>();
+                    collectSurfaces(c.layout(), one);
+                    if (one.isEmpty()) {
+                        failed.add(c);
+                        if (--left[0] == 0) l.countDown();
+                        continue;
+                    }
+                    copySurface(one.get(0), i, tries, dst, ok -> {
+                        if (!ok) failed.add(c);
+                        if (--left[0] == 0) l.countDown();
+                    });
+                }
+            } catch (Throwable t) {
+                StatsLog.log("foto layar (video) gagal: " + t);
+                l.countDown();
+            }
+        });
+        try { l.await(20, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+        return failed;
+    }
 
     private static boolean notBlack(android.graphics.Bitmap b) {
         int w = b.getWidth(), h = b.getHeight(), hit = 0, n = 0;
@@ -267,7 +313,7 @@ public class MainActivity extends Activity {
                     if (code == android.view.PixelCopy.SUCCESS)
                         new android.graphics.Canvas(dst).drawBitmap(sb, loc[0], loc[1], null);
                     StatsLog.log("foto layar: video#" + idx + " @" + loc[0] + "," + loc[1] + " " + sw + "x" + sh
-                            + " kode=" + code + (good ? " OK" : " HITAM") + " percobaan=" + (5 - tries));
+                            + " kode=" + code + (good ? " OK" : " HITAM") + " sisa-coba=" + (tries - 1));
                     sb.recycle();
                     done.done(good);
                 } else {
@@ -733,6 +779,7 @@ public class MainActivity extends Activity {
                     VideoCell cell = new VideoCell(libVLC, videos.get(i), cam.chain(pc), cam.key(), !"none".equals(cam.maxRes), pc.networkCaching, ui);
                     cell.name = cam.name + " (" + cam.quality + ")";
                     cell.display = cam.display;
+                    cell.baseSw = "sw".equals(cfg.decoder);
                     cells.add(cell);
                     cell.start();
                 }
@@ -1119,6 +1166,7 @@ public class MainActivity extends Activity {
         VideoCell vc = new VideoCell(libVLC, v, cam.chain(pc), cam.key(), !"none".equals(cam.maxRes), pc.networkCaching, ui);
         vc.name = cam.name + " (" + cam.quality + ", layar penuh)";
         vc.display = cam.display;
+        vc.baseSw = cfg != null && "sw".equals(cfg.decoder);
         cells.add(vc);
         vc.start();
 

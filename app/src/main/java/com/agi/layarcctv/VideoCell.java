@@ -50,7 +50,10 @@ public class VideoCell {
     public String display = "fit";        // fit | crop | stretch
     public volatile int stalls = 0;       // berapa kali buffering di tengah pemutaran
     public volatile int retries = 0;      // berapa kali stream putus lalu disambung ulang
-    private boolean playing = false;
+    private volatile boolean playing = false;
+    public volatile boolean baseSw = false;   // dekoder lunak untuk semua kotak (pengaturan)
+    private volatile boolean forceSw = false;  // sementara lunak, untuk foto layar
+    private volatile long lastSwap = 0;
     private float lastBuf = 100f;
     private long pDisp, pLost, pDec;      // nilai sebelumnya, untuk selisih
     private int pStalls, pRetries;
@@ -113,7 +116,7 @@ public class VideoCell {
             media.addOption(":network-caching=" + caching);
             media.addOption(":rtsp-tcp");
             media.addOption(":no-audio");
-            media.addOption(":avcodec-hw=any");
+            media.addOption((baseSw || forceSw) ? ":avcodec-hw=none" : ":avcodec-hw=any");
             mp.setMedia(media);
             media.release();
             mp.play();
@@ -181,10 +184,23 @@ public class VideoCell {
         ui.postDelayed(() -> { if (!released) restartStream(); }, delay);
     }
 
+    public VLCVideoLayout layout() { return view; }
+
+    public boolean isPlayingNow() { return playing; }
+
+    /** Ganti sementara ke dekoder lunak (true) atau kembali normal (false) lalu putar ulang. Panggil di thread UI. */
+    public void setForceSw(boolean sw) {
+        if (released || forceSw == sw) return;
+        forceSw = sw;
+        lastSwap = System.currentTimeMillis();
+        playing = false;
+        restartStream();
+    }
+
     /** Sudah berapa ms kotak ini tidak memutar video (0 bila sedang main). */
     public long downForMs() {
         if (playing) return 0;
-        long since = downSince > 0 ? downSince : createdAt;
+        long since = downSince > 0 ? downSince : Math.max(createdAt, lastSwap);
         return since == 0 ? 0 : System.currentTimeMillis() - since;
     }
 

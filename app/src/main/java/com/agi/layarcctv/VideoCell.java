@@ -188,6 +188,23 @@ public class VideoCell {
 
     public boolean isPlayingNow() { return playing; }
 
+    /** Jumlah gambar yang sudah ditampilkan pada media yang sedang diputar (-1 bila tidak diketahui). */
+    public long displayed() {
+        try {
+            if (mp == null) return -1;
+            Object media = call(mp, "getMedia");
+            Object st = media == null ? null : call(media, "getStats");
+            long d = st == null ? -1 : lf(st, "displayedPictures");
+            if (media != null) { try { media.getClass().getMethod("release").invoke(media); } catch (Throwable ignored) {} }
+            return d;
+        } catch (Throwable t) { return -1; }
+    }
+
+    /** True bila stream sudah diputar ulang setelah penggantian dekoder DAN sudah menampilkan beberapa gambar. */
+    public boolean readyAfterSwap() {
+        return !released && startedAt >= lastSwap && displayed() >= 12;
+    }
+
     /** Ganti sementara ke dekoder lunak (true) atau kembali normal (false) lalu putar ulang. Panggil di thread UI. */
     public void setForceSw(boolean sw) {
         if (released || forceSw == sw) return;

@@ -209,11 +209,11 @@ public class MainActivity extends Activity {
                 boolean allUp = false;
                 while (System.currentTimeMillis() - t0 < 12000) {
                     allUp = true;
-                    for (VideoCell c : batch) if (!c.isPlayingNow()) allUp = false;
+                    for (VideoCell c : batch) if (!c.readyAfterSwap()) allUp = false;
                     if (allUp) break;
                     try { Thread.sleep(300); } catch (InterruptedException e) { break; }
                 }
-                try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
+                try { Thread.sleep(800); } catch (InterruptedException ignored) {}
                 List<VideoCell> still = copyAll(batch, 6, bmp[0]);
                 StatsLog.log("foto layar: putaran " + (i / 2 + 2) + " (dekoder lunak sementara): " + (batch.size() - still.size())
                         + "/" + batch.size() + " tampil" + (allUp ? "" : " [stream belum siap]"));

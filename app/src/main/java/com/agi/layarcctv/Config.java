@@ -20,6 +20,7 @@ public class Config {
     public String tgToken = "";    // token bot Telegram (kosong = kirim otomatis mati)
     public String tgChat = "";     // ID chat tujuan
     public int tgEveryMin = 60;      // kirim foto layar tiap N menit
+    public String decoder = "hw"; // "hw" = dekoder perangkat keras, "sw" = perangkat lunak (foto layar lengkap)
     public boolean tsWatch = true;   // cek Tailscale tiap jam, nyalakan bila mati
     public List<Page> pages = new ArrayList<>();
 
@@ -35,6 +36,7 @@ public class Config {
         c.restartHours = Math.max(0, o.optInt("restartHours", 3));
         c.shotPass = o.optString("shotPass", "");
         c.tsWatch = o.optBoolean("tsWatch", true);
+        c.decoder = "sw".equals(o.optString("decoder", "hw")) ? "sw" : "hw";
         c.tgToken = o.optString("tgToken", "").trim();
         c.tgChat = o.optString("tgChat", "").trim();
         c.tgEveryMin = Math.max(5, o.optInt("tgEveryMin", 60));
@@ -72,6 +74,7 @@ public class Config {
             o.put("restartHours", restartHours);
             o.put("shotPass", shotPass);
             o.put("tsWatch", tsWatch);
+            o.put("decoder", decoder);
             o.put("tgToken", tgToken);
             o.put("tgChat", tgChat);
             o.put("tgEveryMin", tgEveryMin);

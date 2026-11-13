@@ -70,6 +70,12 @@ small{color:#6b7280}
   <input id="sp" placeholder="mis. kata sandi bebas, jangan sama dengan password DVR">
   <small>Setelah Simpan, tombol di bawah membuka foto layar TV saat ini. Bisa dibuka dari mana saja yang menjangkau TV (kantor, atau lewat Tailscale).</small>
   <button class="pri" onclick="openShot()">Lihat layar TV sekarang</button>
+  <label>Dekoder video</label>
+  <select id="dc">
+    <option value="hw">Perangkat keras (hemat CPU, foto layar bisa ada kotak hitam)</option>
+    <option value="sw">Perangkat lunak (foto layar lengkap, CPU lebih berat)</option>
+  </select>
+  <small>Berlaku langsung setelah Simpan (layar CCTV dimuat ulang). Bila memilih lunak, pantau log: kolom "load" dan "buang" tidak boleh naik terus.</small>
   <label>Telegram: token bot (kosong = kirim otomatis mati)</label>
   <input id="tt" placeholder="123456:ABC...">
   <div class="row">
@@ -166,6 +172,7 @@ function render() {
   document.getElementById('nc').value = CFG.networkCaching || 600;
   document.getElementById('rh').value = (CFG.restartHours === undefined) ? 3 : CFG.restartHours;
   document.getElementById('sp').value = CFG.shotPass || '';
+  document.getElementById('dc').value = (CFG.decoder === 'sw') ? 'sw' : 'hw';
   document.getElementById('tt').value = CFG.tgToken || '';
   document.getElementById('tc').value = CFG.tgChat || '';
   document.getElementById('te').value = CFG.tgEveryMin || 60;
@@ -300,6 +307,7 @@ function collect() {
     networkCaching: parseInt(document.getElementById('nc').value) || 600,
     restartHours: Math.max(0, parseInt(document.getElementById('rh').value) || 0),
     shotPass: document.getElementById('sp').value,
+    decoder: document.getElementById('dc').value,
     tgToken: document.getElementById('tt').value.trim(),
     tgChat: document.getElementById('tc').value.trim(),
     tgEveryMin: Math.max(5, parseInt(document.getElementById('te').value) || 60),

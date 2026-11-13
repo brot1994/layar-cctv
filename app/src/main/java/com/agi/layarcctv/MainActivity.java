@@ -537,12 +537,17 @@ public class MainActivity extends Activity {
         checkRecover();
     }
 
+    private String libDecoder = "hw";
+
     private LibVLC newLibVLC() {
         ArrayList<String> opts = new ArrayList<>();
         opts.add("--rtsp-tcp");
         opts.add("--network-caching=600");
         opts.add("--no-audio");
-        opts.add("--avcodec-hw=any");
+        Config cc = (cfg != null) ? cfg : ConfigStore.load(this);
+        libDecoder = "sw".equals(cc.decoder) ? "sw" : "hw";
+        opts.add("sw".equals(libDecoder) ? "--avcodec-hw=none" : "--avcodec-hw=any");
+        StatsLog.log("[Dekoder] " + ("sw".equals(libDecoder) ? "perangkat LUNAK (software)" : "perangkat KERAS (hardware)"));
         return new LibVLC(this, opts);
     }
 
@@ -573,6 +578,14 @@ public class MainActivity extends Activity {
         ui.removeCallbacks(rotateTask);
         cfg = ConfigStore.load(this);
         pages = cfg.pages;
+        if (!("sw".equals(cfg.decoder) ? "sw" : "hw").equals(libDecoder)) {
+            try {
+                final LibVLC old = libVLC;
+                clearScreen();
+                libVLC = newLibVLC();
+                VideoCell.bg(() -> { try { old.release(); } catch (Throwable ignored) {} });
+            } catch (Throwable t) { StatsLog.log("ganti dekoder gagal: " + t); }
+        }
         scheduleRestart();
         cur = -1;
         paused = false;

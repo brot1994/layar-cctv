@@ -16,6 +16,8 @@ public class Config {
     public String defaultPass = "";
     public int networkCaching = 600; // ms, makin besar makin stabil tapi makin delay
     public int restartHours = 3;     // restart otomatis aplikasi tiap N jam (0 = mati)
+    public String shotPass = "";    // password foto layar (kosong = fitur mati)
+    public boolean tsWatch = true;   // cek Tailscale tiap jam, nyalakan bila mati
     public List<Page> pages = new ArrayList<>();
 
     // pandangan satu halaman CCTV (dipakai kode penggambar grid)
@@ -28,6 +30,8 @@ public class Config {
         c.defaultPass = o.optString("defaultPass", "");
         c.networkCaching = o.optInt("networkCaching", 600);
         c.restartHours = Math.max(0, o.optInt("restartHours", 3));
+        c.shotPass = o.optString("shotPass", "");
+        c.tsWatch = o.optBoolean("tsWatch", true);
 
         JSONArray pa = o.optJSONArray("pages");
         if (pa != null) {
@@ -60,6 +64,8 @@ public class Config {
             o.put("defaultPass", defaultPass);
             o.put("networkCaching", networkCaching);
             o.put("restartHours", restartHours);
+            o.put("shotPass", shotPass);
+            o.put("tsWatch", tsWatch);
             JSONArray arr = new JSONArray();
             for (Page p : pages) arr.put(p.toJson());
             o.put("pages", arr);

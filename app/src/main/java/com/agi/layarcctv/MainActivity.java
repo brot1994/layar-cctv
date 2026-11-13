@@ -164,6 +164,118 @@ public class MainActivity extends Activity {
         relaunchProcess("RESTART OTOMATIS (tiap " + (cfg == null ? 0 : cfg.restartHours) + " jam)");
     }
 
+    // ---- foto layar ----
+    /** Dipanggil dari thread server. Mengambil seluruh jendela (termasuk video) lewat PixelCopy. */
+    private byte[] takeShot() {
+        if (stopped || android.os.Build.VERSION.SDK_INT < 26) return null;
+        final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        final int[] result = { -1 };
+        final android.graphics.Bitmap[] bmp = { null };
+        ui.post(() -> {
+            try {
+                View d = getWindow().getDecorView();
+                int w = d.getWidth(), h = d.getHeight();
+                if (w <= 0 || h <= 0) { latch.countDown(); return; }
+                bmp[0] = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+                android.view.PixelCopy.request(getWindow(), bmp[0], code -> { result[0] = code; latch.countDown(); }, ui);
+            } catch (Throwable t) {
+                StatsLog.log("foto layar gagal: " + t);
+                latch.countDown();
+            }
+        });
+        try {
+            if (!latch.await(8, java.util.concurrent.TimeUnit.SECONDS)) return null;
+        } catch (InterruptedException e) { return null; }
+        if (result[0] != android.view.PixelCopy.SUCCESS || bmp[0] == null) {
+            StatsLog.log("foto layar: PixelCopy kode " + result[0]);
+            return null;
+        }
+        try {
+            android.graphics.Bitmap b = bmp[0];
+            if (b.getWidth() > 1280) {
+                int nh = Math.round(b.getHeight() * 1280f / b.getWidth());
+                android.graphics.Bitmap sm = android.graphics.Bitmap.createScaledBitmap(b, 1280, nh, true);
+                b.recycle();
+                b = sm;
+            }
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            b.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, out);
+            b.recycle();
+            return out.toByteArray();
+        } catch (Throwable t) {
+            StatsLog.log("foto layar gagal (kompres): " + t);
+            return null;
+        }
+    }
+
+    // ---- pengawas Tailscale (tiap jam) ----
+    private static final String TS_PKG = "com.tailscale.ipn";
+    private boolean tsMissingLogged = false;
+
+    private final Runnable tsTask = new Runnable() {
+        @Override public void run() {
+            try { checkTailscale(); } catch (Throwable t) { StatsLog.log("cek Tailscale error: " + t); }
+            ui.postDelayed(this, 3600000L);
+        }
+    };
+
+    /** IP Tailscale (100.x) bila antarmuka VPN aktif, selain itu null. */
+    private String tailscaleIp() {
+        try {
+            for (java.util.Enumeration<NetworkInterface> e = NetworkInterface.getNetworkInterfaces(); e.hasMoreElements();) {
+                NetworkInterface ni = e.nextElement();
+                if (!ni.isUp()) continue;
+                for (java.util.Enumeration<InetAddress> a = ni.getInetAddresses(); a.hasMoreElements();) {
+                    InetAddress ia = a.nextElement();
+                    byte[] b = ia.getAddress();
+                    // rentang CGNAT Tailscale 100.64.0.0/10
+                    if (b.length == 4 && (b[0] & 0xff) == 100 && ((b[1] & 0xff) >= 64 && (b[1] & 0xff) <= 127))
+                        return ia.getHostAddress();
+                }
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private void checkTailscale() {
+        if (cfg != null && !cfg.tsWatch) return;
+        boolean installed;
+        try { getPackageManager().getPackageInfo(TS_PKG, 0); installed = true; } catch (Throwable t) { installed = false; }
+        if (!installed) {
+            if (!tsMissingLogged) { StatsLog.log("[Tailscale] aplikasi Tailscale belum terpasang di TV"); tsMissingLogged = true; }
+            return;
+        }
+        String ip = tailscaleIp();
+        if (ip != null) { StatsLog.log("[Tailscale] tersambung, IP " + ip); return; }
+
+        StatsLog.log("[Tailscale] TIDAK tersambung -> mencoba menyalakan (kirim perintah sambung)");
+        try {
+            Intent b = new Intent("com.tailscale.ipn.CONNECT_VPN");
+            b.setComponent(new android.content.ComponentName(TS_PKG, TS_PKG + ".IPNReceiver"));
+            sendBroadcast(b);
+        } catch (Throwable t) { StatsLog.log("[Tailscale] perintah sambung gagal: " + t); }
+
+        ui.postDelayed(() -> {
+            String ip2 = tailscaleIp();
+            if (ip2 != null) { StatsLog.log("[Tailscale] berhasil tersambung lagi, IP " + ip2); return; }
+            if (stopped) { StatsLog.log("[Tailscale] masih mati; aplikasi di latar, tidak dibuka paksa"); return; }
+            StatsLog.log("[Tailscale] masih mati -> membuka aplikasi Tailscale sebentar");
+            try {
+                Intent li = getPackageManager().getLaunchIntentForPackage(TS_PKG);
+                if (li == null) li = getPackageManager().getLeanbackLaunchIntentForPackage(TS_PKG);
+                if (li != null) { li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); startActivity(li); }
+            } catch (Throwable t) { StatsLog.log("[Tailscale] gagal membuka: " + t); }
+            ui.postDelayed(() -> {
+                try {
+                    android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+                    am.moveTaskToFront(getTaskId(), 0);
+                } catch (Throwable t) { StatsLog.log("[Tailscale] gagal kembali ke layar CCTV: " + t); }
+                String ip3 = tailscaleIp();
+                StatsLog.log(ip3 != null ? "[Tailscale] tersambung, IP " + ip3 : "[Tailscale] tetap mati (perlu dicek/login manual)");
+            }, 12000L);
+        }, 20000L);
+    }
+
     // ---- log kinerja ----
     private static final long LOG_EVERY = 10000L;
     private final Runnable logTask = new Runnable() {
@@ -189,6 +301,7 @@ public class MainActivity extends Activity {
             return statusJson();
         }
         @Override public String status() { return statusJson(); }
+        @Override public byte[] screenshot() { return takeShot(); }
     };
 
     @Override
@@ -209,6 +322,7 @@ public class MainActivity extends Activity {
         startWatchdog();
         startRotation();
         ui.postDelayed(logTask, LOG_EVERY);
+        ui.postDelayed(tsTask, 60000L);
     }
 
     private void logHeader() {

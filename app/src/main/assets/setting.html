@@ -66,6 +66,11 @@ small{color:#6b7280}
   <label>Restart otomatis aplikasi tiap (jam, 0 = mati)</label>
   <input id="rh" type="number" value="3">
   <small>Aplikasi menutup diri lalu menyala sendiri lagi (layar hitam sekitar 3 detik). Berguna bila TV lama-lama macet.</small>
+  <label>Password foto layar (kosong = fitur mati)</label>
+  <input id="sp" placeholder="mis. kata sandi bebas, jangan sama dengan password DVR">
+  <small>Setelah Simpan, tombol di bawah membuka foto layar TV saat ini. Bisa dibuka dari mana saja yang menjangkau TV (kantor, atau lewat Tailscale).</small>
+  <button class="pri" onclick="openShot()">Lihat layar TV sekarang</button>
+  <label style="display:flex;gap:8px;align-items:center"><input id="tw" type="checkbox" style="width:auto" checked> Cek Tailscale tiap jam, nyalakan bila mati</label>
   <small>Berlaku untuk semua halaman CCTV. Password di tiap kamera menimpa password default.</small>
 </div>
 
@@ -152,6 +157,8 @@ function render() {
   document.getElementById('dp').value = CFG.defaultPass || '';
   document.getElementById('nc').value = CFG.networkCaching || 600;
   document.getElementById('rh').value = (CFG.restartHours === undefined) ? 3 : CFG.restartHours;
+  document.getElementById('sp').value = CFG.shotPass || '';
+  document.getElementById('tw').checked = (CFG.tsWatch !== false);
   var box = document.getElementById('pages');
   box.innerHTML = '';
   CFG.pages.forEach(function(p, i){ box.appendChild(pageCard(p, i)); });
@@ -281,11 +288,18 @@ function collect() {
     defaultPass: document.getElementById('dp').value,
     networkCaching: parseInt(document.getElementById('nc').value) || 600,
     restartHours: Math.max(0, parseInt(document.getElementById('rh').value) || 0),
+    shotPass: document.getElementById('sp').value,
+    tsWatch: document.getElementById('tw').checked,
     pages: pages
   };
 }
 
 function sync() { CFG = collect(); }
+function openShot() {
+  var p = document.getElementById('sp').value;
+  if (!p) { alert('Isi dulu password foto layar, klik Simpan, lalu coba lagi.'); return; }
+  window.open('/layar?p=' + encodeURIComponent(p), '_blank');
+}
 
 function addPage(type) {
   sync();

@@ -1025,6 +1025,8 @@ public class MainActivity extends Activity {
         String layout = c.layout == null ? "1+5" : c.layout;
         if (layout.equals("1+3")) {
             return buildBigPlusColumn(c, 3);
+        } else if (layout.equals("1")) {
+            return buildUniformGrid(c, 1, 1);
         } else if (layout.equals("2x2")) {
             return buildUniformGrid(c, 2, 2);
         } else {

@@ -35,7 +35,11 @@ public class KeepAliveService extends Service {
                     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     startActivity(i);
                     StatsLog.append(KeepAliveService.this, "[Jaga] aplikasi dibuka otomatis");
+                    h.postDelayed(new Runnable() {
+                        @Override public void run() { if (!MainActivity.visible) adbOpen(); }
+                    }, 6000);
                 }
+                if (!ovl) tryGrant();
             } catch (Throwable t) {
                 StatsLog.append(KeepAliveService.this, "[Jaga] gagal: " + t);
             }
@@ -49,6 +53,44 @@ public class KeepAliveService extends Service {
             if (Build.VERSION.SDK_INT >= 26) c.startForegroundService(i);
             else c.startService(i);
         } catch (Throwable ignored) { }
+    }
+
+    private final java.util.concurrent.ExecutorService adb = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private volatile long lastGrantTry = 0;
+    private volatile boolean adbBusy = false;
+
+    /** Beri izin overlay ke diri sendiri lewat ADB lokal (sekali, diulang tiap 10 menit bila belum berhasil). */
+    private void tryGrant() {
+        if (adbBusy || System.currentTimeMillis() - lastGrantTry < 10 * 60000L) return;
+        lastGrantTry = System.currentTimeMillis();
+        adbBusy = true;
+        adb.execute(new Runnable() {
+            @Override public void run() {
+                try {
+                    StatsLog.append(KeepAliveService.this, "[ADB] mencoba memberi izin otomatis (jika muncul dialog di TV: pilih Selalu izinkan)");
+                    String r = AdbSelf.run(KeepAliveService.this, "appops set " + getPackageName() + " SYSTEM_ALERT_WINDOW allow");
+                    StatsLog.append(KeepAliveService.this, "[ADB] izin diberikan. hasil=" + r + " appop=" + appOpMode());
+                } catch (Throwable t) {
+                    StatsLog.append(KeepAliveService.this, "[ADB] gagal: " + t);
+                } finally { adbBusy = false; }
+            }
+        });
+    }
+
+    /** Cadangan: buka aplikasi lewat ADB lokal (tidak kena blokir aktivitas latar). */
+    private void adbOpen() {
+        if (adbBusy) return;
+        adbBusy = true;
+        adb.execute(new Runnable() {
+            @Override public void run() {
+                try {
+                    String r = AdbSelf.run(KeepAliveService.this, "am start -n " + getPackageName() + "/" + MainActivity.class.getName());
+                    StatsLog.append(KeepAliveService.this, "[ADB] buka aplikasi lewat ADB: " + r.replace('\n', ' '));
+                } catch (Throwable t) {
+                    StatsLog.append(KeepAliveService.this, "[ADB] buka gagal: " + t);
+                } finally { adbBusy = false; }
+            }
+        });
     }
 
     private android.view.View dot;
@@ -115,6 +157,7 @@ public class KeepAliveService extends Service {
         try { first = Math.max(1, ConfigStore.load(this).keepMin); } catch (Throwable ignored) { }
         StatsLog.append(this, "[Jaga] layanan jalan, cek pertama " + first + " menit lagi");
         h.postDelayed(tick, first * 60000L);
+        if (!overlayOk()) tryGrant();
         return START_STICKY;
     }
 
@@ -122,6 +165,7 @@ public class KeepAliveService extends Service {
 
     @Override public void onDestroy() {
         h.removeCallbacks(tick);
+        adb.shutdown();
         try { if (dot != null) ((android.view.WindowManager) getSystemService(WINDOW_SERVICE)).removeView(dot); } catch (Throwable ignored) { }
         dot = null;
         super.onDestroy();

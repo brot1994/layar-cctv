@@ -23,12 +23,20 @@ public class KeepAliveService extends Service {
             try {
                 Config c = ConfigStore.load(KeepAliveService.this);
                 min = Math.max(1, c.keepMin);
-                if (c.keepOpen && !MainActivity.visible && interactive()) {
+                boolean inter = interactive();
+                boolean ovl = overlayOk();
+                StatsLog.append(KeepAliveService.this, "[Jaga] cek: aktif=" + c.keepOpen
+                        + " tampil=" + MainActivity.visible + " layarNyala=" + inter
+                        + " izinTampilDiAtas=" + ovl + " interval=" + min + "mnt");
+                if (c.keepOpen && !MainActivity.visible && inter) {
                     Intent i = new Intent(KeepAliveService.this, MainActivity.class);
                     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     startActivity(i);
+                    StatsLog.append(KeepAliveService.this, "[Jaga] aplikasi dibuka otomatis");
                 }
-            } catch (Throwable ignored) { }
+            } catch (Throwable t) {
+                StatsLog.append(KeepAliveService.this, "[Jaga] gagal: " + t);
+            }
             h.postDelayed(this, min * 60000L);
         }
     };
@@ -39,6 +47,11 @@ public class KeepAliveService extends Service {
             if (Build.VERSION.SDK_INT >= 26) c.startForegroundService(i);
             else c.startService(i);
         } catch (Throwable ignored) { }
+    }
+
+    private boolean overlayOk() {
+        try { return Build.VERSION.SDK_INT < 23 || android.provider.Settings.canDrawOverlays(this); }
+        catch (Throwable t) { return false; }
     }
 
     private boolean interactive() {
@@ -63,7 +76,10 @@ public class KeepAliveService extends Service {
             else startForeground(1, n);
         } catch (Throwable ignored) { }
         h.removeCallbacks(tick);
-        h.postDelayed(tick, 3 * 60000L);
+        int first = 3;
+        try { first = Math.max(1, ConfigStore.load(this).keepMin); } catch (Throwable ignored) { }
+        StatsLog.append(this, "[Jaga] layanan jalan, cek pertama " + first + " menit lagi");
+        h.postDelayed(tick, first * 60000L);
         return START_STICKY;
     }
 

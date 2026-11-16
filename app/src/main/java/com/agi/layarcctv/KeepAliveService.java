@@ -25,9 +25,11 @@ public class KeepAliveService extends Service {
                 min = Math.max(1, c.keepMin);
                 boolean inter = interactive();
                 boolean ovl = overlayOk();
+                String ov = ensureOverlay();
                 StatsLog.append(KeepAliveService.this, "[Jaga] cek: aktif=" + c.keepOpen
                         + " tampil=" + MainActivity.visible + " layarNyala=" + inter
-                        + " izinTampilDiAtas=" + ovl + " interval=" + min + "mnt");
+                        + " izinTampilDiAtas=" + ovl + " appop=" + appOpMode() + " jendelaKecil=" + ov
+                        + " interval=" + min + "mnt");
                 if (c.keepOpen && !MainActivity.visible && inter) {
                     Intent i = new Intent(KeepAliveService.this, MainActivity.class);
                     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -47,6 +49,39 @@ public class KeepAliveService extends Service {
             if (Build.VERSION.SDK_INT >= 26) c.startForegroundService(i);
             else c.startService(i);
         } catch (Throwable ignored) { }
+    }
+
+    private android.view.View dot;
+
+    /** Pasang jendela 1x1 piksel transparan: aplikasi yang punya jendela terlihat boleh membuka aktivitas dari latar. */
+    private String ensureOverlay() {
+        if (dot != null) return "terpasang";
+        try {
+            android.view.WindowManager wm = (android.view.WindowManager) getSystemService(WINDOW_SERVICE);
+            android.view.View v = new android.view.View(this);
+            int type = Build.VERSION.SDK_INT >= 26 ? android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    : android.view.WindowManager.LayoutParams.TYPE_PHONE;
+            android.view.WindowManager.LayoutParams lp = new android.view.WindowManager.LayoutParams(1, 1, type,
+                    android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                    android.graphics.PixelFormat.TRANSLUCENT);
+            wm.addView(v, lp);
+            dot = v;
+            return "berhasil";
+        } catch (Throwable t) {
+            return "gagal(" + t.getClass().getSimpleName() + ")";
+        }
+    }
+
+    private String appOpMode() {
+        try {
+            android.app.AppOpsManager a = (android.app.AppOpsManager) getSystemService(APP_OPS_SERVICE);
+            int m = a.checkOpNoThrow("android:system_alert_window", android.os.Process.myUid(), getPackageName());
+            return m == android.app.AppOpsManager.MODE_ALLOWED ? "allowed"
+                    : m == android.app.AppOpsManager.MODE_IGNORED ? "ignored"
+                    : m == android.app.AppOpsManager.MODE_ERRORED ? "errored"
+                    : m == android.app.AppOpsManager.MODE_DEFAULT ? "default" : String.valueOf(m);
+        } catch (Throwable t) { return "?"; }
     }
 
     private boolean overlayOk() {
@@ -87,6 +122,8 @@ public class KeepAliveService extends Service {
 
     @Override public void onDestroy() {
         h.removeCallbacks(tick);
+        try { if (dot != null) ((android.view.WindowManager) getSystemService(WINDOW_SERVICE)).removeView(dot); } catch (Throwable ignored) { }
+        dot = null;
         super.onDestroy();
     }
 }

@@ -22,6 +22,8 @@ public class Config {
     public int tgEveryMin = 60;      // kirim foto layar tiap N menit
     public String decoder = "hw"; // "hw" = dekoder perangkat keras, "sw" = perangkat lunak (foto layar lengkap)
     public boolean tsWatch = true;   // cek Tailscale tiap jam, nyalakan bila mati
+    public boolean keepOpen = true;  // buka aplikasi otomatis kalau tidak tampil
+    public int keepMin = 3;          // interval pengecekan (menit)
     public List<Page> pages = new ArrayList<>();
 
     // pandangan satu halaman CCTV (dipakai kode penggambar grid)
@@ -36,6 +38,8 @@ public class Config {
         c.restartHours = Math.max(0, o.optInt("restartHours", 3));
         c.shotPass = o.optString("shotPass", "");
         c.tsWatch = o.optBoolean("tsWatch", true);
+        c.keepOpen = o.optBoolean("keepOpen", true);
+        c.keepMin = Math.max(1, o.optInt("keepMin", 3));
         c.decoder = "sw".equals(o.optString("decoder", "hw")) ? "sw" : "hw";
         c.tgToken = o.optString("tgToken", "").trim();
         c.tgChat = o.optString("tgChat", "").trim();
@@ -74,6 +78,8 @@ public class Config {
             o.put("restartHours", restartHours);
             o.put("shotPass", shotPass);
             o.put("tsWatch", tsWatch);
+            o.put("keepOpen", keepOpen);
+            o.put("keepMin", keepMin);
             o.put("decoder", decoder);
             o.put("tgToken", tgToken);
             o.put("tgChat", tgChat);

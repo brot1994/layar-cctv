@@ -85,6 +85,8 @@ small{color:#6b7280}
   <button class="pri" onclick="ctl('tg');msg('Perintah kirim ke Telegram dikirim. Cek chat Telegram atau log TV.', true)">Kirim foto ke Telegram sekarang</button>
   <small>Isi dulu lalu klik Simpan, baru tombol kirim. Hasil tiap pengiriman tercatat di log TV dengan awalan [Telegram].</small>
   <label style="display:flex;gap:8px;align-items:center"><input id="tw" type="checkbox" style="width:auto" checked> Cek Tailscale tiap jam, nyalakan bila mati</label>
+  <label style="display:flex;gap:8px;align-items:center"><input id="ko" type="checkbox" style="width:auto" checked> Buka aplikasi otomatis kalau tidak tampil (mis. TV di Home)</label>
+  <label>Cek tiap (menit)</label><input id="km" type="number" min="1" value="3">
   <small>Berlaku untuk semua halaman CCTV. Password di tiap kamera menimpa password default.</small>
 </div>
 
@@ -177,6 +179,8 @@ function render() {
   document.getElementById('tc').value = CFG.tgChat || '';
   document.getElementById('te').value = CFG.tgEveryMin || 60;
   document.getElementById('tw').checked = (CFG.tsWatch !== false);
+  document.getElementById('ko').checked = (CFG.keepOpen !== false);
+  document.getElementById('km').value = CFG.keepMin || 3;
   var box = document.getElementById('pages');
   box.innerHTML = '';
   CFG.pages.forEach(function(p, i){ box.appendChild(pageCard(p, i)); });
@@ -312,6 +316,8 @@ function collect() {
     tgChat: document.getElementById('tc').value.trim(),
     tgEveryMin: Math.max(5, parseInt(document.getElementById('te').value) || 60),
     tsWatch: document.getElementById('tw').checked,
+    keepOpen: document.getElementById('ko').checked,
+    keepMin: Math.max(1, parseInt(document.getElementById('km').value) || 3),
     pages: pages
   };
 }

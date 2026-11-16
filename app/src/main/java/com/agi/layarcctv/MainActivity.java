@@ -36,6 +36,9 @@ import java.util.Enumeration;
 import java.util.List;
 
 public class MainActivity extends Activity {
+    /** true selama aplikasi tampil di depan (dibaca KeepAliveService). */
+    static volatile boolean visible = false;
+
 
     private LibVLC libVLC;
     private FrameLayout root;
@@ -562,6 +565,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         hideSystemUi();
+        KeepAliveService.start(this);
 
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -1344,6 +1348,7 @@ public class MainActivity extends Activity {
     /** Aplikasi tidak terlihat (Home, screensaver, TV tidur): hentikan semua stream & halaman web. */
     @Override
     protected void onStop() {
+        visible = false;
         stopped = true;
         ui.removeCallbacks(rotateTask);
         clearScreen();
@@ -1354,6 +1359,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onStart() {
         super.onStart();
+        visible = true;
         if (stopped) {
             stopped = false;
             startRotation();

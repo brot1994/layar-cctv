@@ -16,6 +16,7 @@ public class BootReceiver extends BroadcastReceiver {
                 || Intent.ACTION_MY_PACKAGE_REPLACED.equals(a)
                 || a.endsWith("QUICKBOOT_POWERON"))) return;
         final Context app = context.getApplicationContext();
+        KeepAliveService.start(app);
         final PendingResult pr = goAsync();
         final Handler h = new Handler(Looper.getMainLooper());
         final int[] n = {0};

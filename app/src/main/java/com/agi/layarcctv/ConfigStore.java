@@ -25,7 +25,7 @@ public class ConfigStore {
 
     public static void save(Context ctx, Config cfg) {
         SharedPreferences sp = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE);
-        sp.edit().putString(KEY, cfg.toJson().toString()).apply();
+        sp.edit().putString(KEY, cfg.toJson().toString()).commit();
     }
 
     public static void saveRaw(Context ctx, String json) throws Exception {

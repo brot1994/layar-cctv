@@ -1,0 +1,58 @@
+name: Build Remote TV Samsung (Windows)
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'RemoteSamsung/**'
+      - '.github/workflows/remotesamsung.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish RemoteSamsung.exe (self-contained, satu file)
+        shell: pwsh
+        run: |
+          dotnet publish RemoteSamsung/RemoteSamsung.csproj -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true -o out
+          Get-ChildItem out | Format-Table Name, Length
+
+      - name: Susun folder distribusi
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/RemoteSamsung | Out-Null
+          Copy-Item out/RemoteSamsung.exe dist/RemoteSamsung/RemoteSamsung.exe
+          Copy-Item RemoteSamsung/README.txt dist/RemoteSamsung/README.txt
+          Compress-Archive -Path dist/RemoteSamsung -DestinationPath RemoteSamsung.zip -Force
+          Get-Item RemoteSamsung.zip | Format-Table Name, Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RemoteSamsung
+          path: RemoteSamsung.zip
+          if-no-files-found: error
+
+      - name: Publish zip as GitHub Release
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "remotesamsung-$env:GITHUB_RUN_NUMBER" RemoteSamsung.zip `
+            --title "Remote TV build $env:GITHUB_RUN_NUMBER" `
+            --notes "Remote TV Samsung (Tizen). Ekstrak zip lalu jalankan RemoteSamsung.exe."

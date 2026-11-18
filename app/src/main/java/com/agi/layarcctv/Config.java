@@ -19,7 +19,7 @@ public class Config {
     public String shotPass = "";    // password foto layar (kosong = fitur mati)
     public String tgToken = "";    // token bot Telegram (kosong = kirim otomatis mati)
     public String tgChat = "";     // ID chat tujuan
-    public int tgEveryMin = 60;      // kirim foto layar tiap N menit
+    public int tgEveryMin = 60;      // kirim foto layar tiap N menit (0 = tidak otomatis, hanya lewat perintah /foto)
     public String decoder = "hw"; // "hw" = dekoder perangkat keras, "sw" = perangkat lunak (foto layar lengkap)
     public boolean tsWatch = true;   // cek Tailscale tiap jam, nyalakan bila mati
     public boolean keepOpen = true;  // buka aplikasi otomatis kalau tidak tampil
@@ -43,7 +43,7 @@ public class Config {
         c.decoder = "sw".equals(o.optString("decoder", "hw")) ? "sw" : "hw";
         c.tgToken = o.optString("tgToken", "").trim();
         c.tgChat = o.optString("tgChat", "").trim();
-        c.tgEveryMin = Math.max(5, o.optInt("tgEveryMin", 60));
+        { int v = o.optInt("tgEveryMin", 60); c.tgEveryMin = v <= 0 ? 0 : Math.max(5, v); }
 
         JSONArray pa = o.optJSONArray("pages");
         if (pa != null) {

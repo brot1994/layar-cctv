@@ -383,7 +383,7 @@ public class MainActivity extends Activity {
     private final Runnable tgTask = new Runnable() {
         @Override public void run() {
             try {
-                if (cfg != null && !cfg.tgToken.isEmpty() && !cfg.tgChat.isEmpty() && !stopped) {
+                if (cfg != null && cfg.tgEveryMin > 0 && !cfg.tgToken.isEmpty() && !cfg.tgChat.isEmpty() && !stopped) {
                     android.content.SharedPreferences sp = getSharedPreferences("tg", MODE_PRIVATE);
                     long last = sp.getLong("last", 0);
                     if (System.currentTimeMillis() - last >= cfg.tgEveryMin * 60000L) sendTelegramAsync(false);
@@ -399,11 +399,18 @@ public class MainActivity extends Activity {
             if (manual) StatsLog.log("[Telegram] token/ID chat belum diisi");
             return;
         }
-        if (!tgBusy.compareAndSet(false, true)) return;
+        if (!tgBusy.compareAndSet(false, true)) {
+            if (manual) postTelegramText(c.tgToken, c.tgChat, "Masih memproses foto sebelumnya, coba lagi sebentar.");
+            return;
+        }
         Thread t = new Thread(() -> {
             try {
                 byte[] jpg = takeShot();
-                if (jpg == null) { StatsLog.log("[Telegram] batal: foto layar gagal/aplikasi tidak tampil"); return; }
+                if (jpg == null) {
+                    StatsLog.log("[Telegram] batal: foto layar gagal/aplikasi tidak tampil");
+                    if (manual) postTelegramText(c.tgToken, c.tgChat, "Foto layar gagal: aplikasi Layar CCTV sedang tidak tampil di TV atau TV sedang standby.");
+                    return;
+                }
                 String cap = "Layar TV " + new java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.US).format(new java.util.Date())
                         + (manual ? " (manual)" : "");
                 String err = postTelegram(c.tgToken, c.tgChat, cap, jpg);
@@ -419,6 +426,81 @@ public class MainActivity extends Activity {
                 tgBusy.set(false);
             }
         }, "telegram");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    // ---- perintah dari bot Telegram (/foto) ----
+    private volatile boolean tgPollRun = false;
+
+    private static String httpGetStr(String url, int readMs) throws Exception {
+        java.net.HttpURLConnection con = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        try {
+            con.setConnectTimeout(15000);
+            con.setReadTimeout(readMs);
+            java.io.InputStream is = con.getResponseCode() == 200 ? con.getInputStream() : con.getErrorStream();
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+            if (is != null) { byte[] b = new byte[2048]; int n; while ((n = is.read(b)) != -1 && bo.size() < 200000) bo.write(b, 0, n); }
+            return bo.toString("UTF-8");
+        } finally { con.disconnect(); }
+    }
+
+    private static void postTelegramText(String token, String chat, String text) {
+        try {
+            String u = "https://api.telegram.org/bot" + token + "/sendMessage?chat_id="
+                    + java.net.URLEncoder.encode(chat, "UTF-8") + "&text=" + java.net.URLEncoder.encode(text, "UTF-8");
+            httpGetStr(u, 20000);
+        } catch (Throwable ignored) { }
+    }
+
+    /** Dengarkan perintah bot: /foto -> kirim foto layar. Hanya dari ID chat yang diisi di setting. */
+    private void startTelegramPolling() {
+        if (tgPollRun) return;
+        tgPollRun = true;
+        Thread t = new Thread(() -> {
+            long offset = 0;
+            boolean first = true;
+            String lastToken = "";
+            while (tgPollRun) {
+                try {
+                    Config c = cfg;
+                    if (c == null || c.tgToken.isEmpty() || c.tgChat.isEmpty()) { Thread.sleep(15000); continue; }
+                    if (!c.tgToken.equals(lastToken)) { lastToken = c.tgToken; first = true; offset = 0; }
+                    String url = "https://api.telegram.org/bot" + c.tgToken + "/getUpdates?timeout=25"
+                            + (first ? "&offset=-1" : "&offset=" + offset);
+                    String body = httpGetStr(url, 40000);
+                    org.json.JSONObject o = new org.json.JSONObject(body);
+                    if (!o.optBoolean("ok", false)) { Thread.sleep(20000); continue; }
+                    org.json.JSONArray res = o.optJSONArray("result");
+                    boolean wasFirst = first;
+                    first = false;
+                    if (res == null) continue;
+                    for (int i = 0; i < res.length(); i++) {
+                        org.json.JSONObject u = res.getJSONObject(i);
+                        offset = Math.max(offset, u.optLong("update_id") + 1);
+                        if (wasFirst) continue; // abaikan pesan lama sebelum aplikasi mulai
+                        org.json.JSONObject m = u.optJSONObject("message");
+                        if (m == null) continue;
+                        org.json.JSONObject chat = m.optJSONObject("chat");
+                        String cid = chat == null ? "" : String.valueOf(chat.optLong("id"));
+                        if (!cid.equals(c.tgChat.trim())) continue; // hanya chat yang diizinkan
+                        String txt = m.optString("text", "").trim().toLowerCase(java.util.Locale.US);
+                        int at = txt.indexOf('@');
+                        if (at > 0) txt = txt.substring(0, at);
+                        if (txt.equals("/foto") || txt.equals("foto") || txt.equals("/layar")) {
+                            StatsLog.log("[Telegram] perintah /foto diterima");
+                            sendTelegramAsync(true);
+                        } else if (txt.equals("/start") || txt.equals("/help")) {
+                            postTelegramText(c.tgToken, c.tgChat, "Perintah:\n/foto - ambil foto layar TV sekarang");
+                        }
+                    }
+                } catch (InterruptedException ie) {
+                    return;
+                } catch (Throwable e) {
+                    try { Thread.sleep(20000); } catch (InterruptedException ie) { return; }
+                }
+            }
+        }, "tg-poll");
         t.setDaemon(true);
         t.start();
     }
@@ -581,6 +663,7 @@ public class MainActivity extends Activity {
         ui.postDelayed(logTask, LOG_EVERY);
         ui.postDelayed(tsTask, 60000L);
         ui.postDelayed(tgTask, 120000L);
+        startTelegramPolling();
     }
 
     private void logHeader() {
@@ -1376,6 +1459,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        tgPollRun = false;
         ui.removeCallbacks(rotateTask);
         clearScreen();
         if (webServer != null) webServer.stop();

@@ -80,7 +80,7 @@ small{color:#6b7280}
   <input id="tt" placeholder="123456:ABC...">
   <div class="row">
     <div><label>ID chat Telegram</label><input id="tc" placeholder="mis. 123456789"></div>
-    <div><label>Kirim foto layar tiap (menit, min 5)</label><input id="te" type="number" value="60"></div>
+    <div><label>Kirim foto otomatis tiap (menit, min 5; isi 0 = mati, ambil pakai perintah /foto)</label><input id="te" type="number" value="60"></div>
   </div>
   <button class="pri" onclick="ctl('tg');msg('Perintah kirim ke Telegram dikirim. Cek chat Telegram atau log TV.', true)">Kirim foto ke Telegram sekarang</button>
   <small>Isi dulu lalu klik Simpan, baru tombol kirim. Hasil tiap pengiriman tercatat di log TV dengan awalan [Telegram].</small>
@@ -177,7 +177,7 @@ function render() {
   document.getElementById('dc').value = (CFG.decoder === 'sw') ? 'sw' : 'hw';
   document.getElementById('tt').value = CFG.tgToken || '';
   document.getElementById('tc').value = CFG.tgChat || '';
-  document.getElementById('te').value = CFG.tgEveryMin || 60;
+  document.getElementById('te').value = (CFG.tgEveryMin === 0 ? 0 : (CFG.tgEveryMin || 60));
   document.getElementById('tw').checked = (CFG.tsWatch !== false);
   document.getElementById('ko').checked = (CFG.keepOpen !== false);
   document.getElementById('km').value = CFG.keepMin || 3;
@@ -315,7 +315,7 @@ function collect() {
     decoder: document.getElementById('dc').value,
     tgToken: document.getElementById('tt').value.trim(),
     tgChat: document.getElementById('tc').value.trim(),
-    tgEveryMin: Math.max(5, parseInt(document.getElementById('te').value) || 60),
+    tgEveryMin: (function(){ var v = parseInt(document.getElementById('te').value); if (isNaN(v)) return 60; return v <= 0 ? 0 : Math.max(5, v); })(),
     tsWatch: document.getElementById('tw').checked,
     keepOpen: document.getElementById('ko').checked,
     keepMin: Math.max(1, parseInt(document.getElementById('km').value) || 3),

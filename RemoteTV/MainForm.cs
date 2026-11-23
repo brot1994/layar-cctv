@@ -23,6 +23,7 @@ public class MainForm : Form
     readonly TabPage tabFile = new("File / APK");
     readonly TabPage tabApps = new("Aplikasi");
     readonly TabPage tabScreen = new("Layar");
+    readonly TabPage tabWatch = new("Pengawas");
     readonly TextBox txtSend = new();
     readonly CheckBox chkEnter = new();
     readonly ListBox lstApps = new();
@@ -95,11 +96,12 @@ public class MainForm : Form
 
         // ---- tab ----
         tabs.Dock = DockStyle.Fill;
-        tabs.Controls.AddRange(new Control[] { tabRemote, tabFile, tabApps, tabScreen });
+        tabs.Controls.AddRange(new Control[] { tabRemote, tabFile, tabApps, tabScreen, tabWatch });
         BuildRemoteTab();
         BuildFileTab();
         BuildAppsTab();
         BuildScreenTab();
+        tabWatch.Controls.Add(new WatchPanel(adb, settings, Log) { Dock = DockStyle.Fill });
 
         // urutan Add: Fill dulu, lalu Top/Bottom
         Controls.Add(tabs);

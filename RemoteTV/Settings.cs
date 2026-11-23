@@ -16,6 +16,15 @@ public class AppSettings
     public List<TvEntry> Tvs { get; set; } = new();
     public string LastIp { get; set; } = "";
 
+    // --- Pengawas ---
+    public bool WatchOn { get; set; } = false;
+    public int WatchMin { get; set; } = 3;
+    public int WatchFrom { get; set; } = 5;     // jam mulai pengawasan
+    public int WatchTo { get; set; } = 22;      // jam selesai pengawasan
+    public bool WatchWake { get; set; } = true; // bangunkan TV (KEYCODE_WAKEUP) sebelum membuka aplikasi
+    public string WatchTgToken { get; set; } = "";
+    public string WatchTgChat { get; set; } = "";
+
     static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "RemoteTV", "settings.json");

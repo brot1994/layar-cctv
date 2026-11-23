@@ -3,9 +3,14 @@ namespace RemoteTV;
 static class Program
 {
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
-        Application.Run(new MainForm());
+        var f = new MainForm();
+        if (args.Contains("--pengawas"))
+        {
+            f.WindowState = FormWindowState.Minimized;
+        }
+        Application.Run(f);
     }
 }

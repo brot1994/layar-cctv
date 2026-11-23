@@ -453,6 +453,50 @@ public class MainActivity extends Activity {
         } catch (Throwable ignored) { }
     }
 
+    /** Ringkasan kondisi untuk perintah /status. */
+    private String buildStatusText() {
+        try {
+            String res = onUi(() -> {
+                StringBuilder b = new StringBuilder();
+                String ip = "";
+                try { ip = settingUrl(); } catch (Throwable ignored) { }
+                b.append("Layar CCTV ").append(ip).append("\n");
+                b.append("Aplikasi: jalan, ").append(stopped ? "TIDAK tampil di layar" : "tampil di layar").append("\n");
+                int c = cur;
+                b.append("Halaman: ").append((c >= 0 && c < pages.size()) ? pages.get(c).title() : "-")
+                        .append(" (").append(c + 1).append("/").append(pages.size()).append(")\n");
+                if (cells.isEmpty()) {
+                    b.append("Kamera: (halaman ini bukan halaman CCTV)\n");
+                } else {
+                    int bad = 0;
+                    StringBuilder det = new StringBuilder();
+                    for (VideoCell v : cells) {
+                        long d = v.downForMs();
+                        if (d > 20000) { bad++; det.append("  - ").append(v.name).append(": mati ").append(d / 60000).append(" mnt\n"); }
+                    }
+                    b.append("Kamera: ").append(cells.size() - bad).append(" dari ").append(cells.size()).append(" lancar\n");
+                    b.append(det);
+                }
+                try {
+                    android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+                    android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+                    am.getMemoryInfo(mi);
+                    b.append("RAM kosong: ").append(mi.availMem / 1048576).append(" MB\n");
+                } catch (Throwable ignored) { }
+                long up = android.os.SystemClock.elapsedRealtime() / 60000;
+                b.append("TV menyala: ").append(up / 60).append(" jam ").append(up % 60).append(" mnt\n");
+                if (android.os.Build.VERSION.SDK_INT >= 24) {
+                    long ap = (android.os.SystemClock.elapsedRealtime() - android.os.Process.getStartElapsedRealtime()) / 60000;
+                    b.append("Aplikasi jalan: ").append(ap / 60).append(" jam ").append(ap % 60).append(" mnt\n");
+                }
+                return b.toString().trim();
+            });
+            return res != null ? res : "Aplikasi jalan, tetapi status belum bisa dibaca (layar sedang sibuk). Coba lagi.";
+        } catch (Throwable e) {
+            return "Aplikasi jalan, tetapi status gagal dibaca: " + e;
+        }
+    }
+
     /** Dengarkan perintah bot: /foto -> kirim foto layar. Hanya dari ID chat yang diisi di setting. */
     private void startTelegramPolling() {
         if (tgPollRun) return;
@@ -490,8 +534,11 @@ public class MainActivity extends Activity {
                         if (txt.equals("/foto") || txt.equals("foto") || txt.equals("/layar")) {
                             StatsLog.log("[Telegram] perintah /foto diterima");
                             sendTelegramAsync(true);
+                        } else if (txt.equals("/status") || txt.equals("status")) {
+                            StatsLog.log("[Telegram] perintah /status diterima");
+                            postTelegramText(c.tgToken, c.tgChat, buildStatusText());
                         } else if (txt.equals("/start") || txt.equals("/help")) {
-                            postTelegramText(c.tgToken, c.tgChat, "Perintah:\n/foto - ambil foto layar TV sekarang");
+                            postTelegramText(c.tgToken, c.tgChat, "Perintah:\n/foto - ambil foto layar TV sekarang\n/status - kondisi aplikasi & kamera");
                         }
                     }
                 } catch (InterruptedException ie) {

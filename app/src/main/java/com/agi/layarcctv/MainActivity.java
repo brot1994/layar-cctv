@@ -537,8 +537,16 @@ public class MainActivity extends Activity {
                         } else if (txt.equals("/status") || txt.equals("status")) {
                             StatsLog.log("[Telegram] perintah /status diterima");
                             postTelegramText(c.tgToken, c.tgChat, buildStatusText());
+                        } else if (txt.equals("/log") || txt.equals("log")) {
+                            String ev = StatsLog.events(getApplicationContext(), 6000);
+                            String[] ls = ev.split("\n");
+                            StringBuilder ob = new StringBuilder();
+                            for (int k = Math.max(0, ls.length - 25); k < ls.length; k++) ob.append(ls[k].replace("2026-", "")).append("\n");
+                            String out = ob.toString().trim();
+                            if (out.length() > 3800) out = out.substring(out.length() - 3800);
+                            postTelegramText(c.tgToken, c.tgChat, "Kejadian terakhir:\n" + out);
                         } else if (txt.equals("/start") || txt.equals("/help")) {
-                            postTelegramText(c.tgToken, c.tgChat, "Perintah:\n/foto - ambil foto layar TV sekarang\n/status - kondisi aplikasi & kamera");
+                            postTelegramText(c.tgToken, c.tgChat, "Perintah:\n/foto - foto layar TV sekarang\n/status - kondisi aplikasi & kamera\n/log - kejadian terakhir (mulai, restart, pengawas)");
                         }
                     }
                 } catch (InterruptedException ie) {

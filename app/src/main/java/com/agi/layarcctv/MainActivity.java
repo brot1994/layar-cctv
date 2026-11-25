@@ -396,9 +396,18 @@ public class MainActivity extends Activity {
     /** Apakah sekarang di dalam jam kirim otomatis (kosong = sepanjang hari; boleh melewati tengah malam). */
     private static boolean inTgWindow(Config c) {
         try {
-            if (c.tgFrom == null || c.tgTo == null || c.tgFrom.isEmpty() || c.tgTo.isEmpty()) return true;
-            int a = hm(c.tgFrom), b = hm(c.tgTo);
             java.util.Calendar cal = java.util.Calendar.getInstance();
+            int dow = cal.get(java.util.Calendar.DAY_OF_WEEK);
+            boolean weekend = dow == java.util.Calendar.SATURDAY || dow == java.util.Calendar.SUNDAY;
+            String from = c.tgFrom, to = c.tgTo;
+            if (weekend) {
+                if (c.tgNoWe) return false;
+                if (c.tgWeFrom != null && !c.tgWeFrom.isEmpty() && c.tgWeTo != null && !c.tgWeTo.isEmpty()) {
+                    from = c.tgWeFrom; to = c.tgWeTo;
+                }
+            }
+            if (from == null || to == null || from.isEmpty() || to.isEmpty()) return true;
+            int a = hm(from), b = hm(to);
             int now = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE);
             if (a == b) return true;
             return a < b ? (now >= a && now < b) : (now >= a || now < b);
@@ -756,8 +765,15 @@ public class MainActivity extends Activity {
     }
 
     /** Dipanggil tiap 10 detik: catat keadaan tiap kotak CCTV dan memori TV. */
+    private long lastFullLog = 0;
+
     private void logTick() {
         if (stopped || cells.isEmpty()) return;
+        boolean anyBad = false;
+        for (VideoCell c : new ArrayList<>(cells)) if (c.downForMs() > 0) { anyBad = true; break; }
+        long nowMs = System.currentTimeMillis();
+        boolean writeLog = anyBad || nowMs - lastFullLog >= 60000L;
+        if (writeLog) lastFullLog = nowMs;
         String title = (cur >= 0 && cur < pages.size()) ? pages.get(cur).title() : "-";
         String sys = "";
         try {
@@ -775,8 +791,10 @@ public class MainActivity extends Activity {
                 if (l != null) sys += " load=" + l.split(" ")[0];
             } catch (Throwable ignored) {}
         } catch (Throwable ignored) {}
-        StatsLog.append(this, "[" + title + "] " + sys);
-        for (VideoCell c : new ArrayList<>(cells)) StatsLog.append(this, "   " + c.snapshot());
+        if (writeLog) {
+            StatsLog.append(this, "[" + title + "] " + sys);
+            for (VideoCell c : new ArrayList<>(cells)) StatsLog.append(this, "   " + c.snapshot());
+        }
         checkRecover();
     }
 

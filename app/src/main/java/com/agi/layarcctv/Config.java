@@ -22,6 +22,9 @@ public class Config {
     public int tgEveryMin = 60;      // kirim foto layar tiap N menit (0 = tidak otomatis, hanya lewat perintah /foto)
     public String tgFrom = "";       // jam mulai kirim foto otomatis (HH:mm), kosong = sepanjang hari
     public String tgTo = "";         // jam selesai (HH:mm)
+    public String tgWeFrom = "";     // akhir pekan (Sabtu-Minggu): mulai; kosong = ikut hari kerja
+    public String tgWeTo = "";
+    public boolean tgNoWe = false;   // true = tidak kirim otomatis di akhir pekan
     public String decoder = "hw"; // "hw" = dekoder perangkat keras, "sw" = perangkat lunak (foto layar lengkap)
     public boolean tsWatch = true;   // cek Tailscale tiap jam, nyalakan bila mati
     public boolean keepOpen = true;  // buka aplikasi otomatis kalau tidak tampil
@@ -41,6 +44,9 @@ public class Config {
         c.shotPass = o.optString("shotPass", "");
         c.tgFrom = o.optString("tgFrom", "").trim();
         c.tgTo = o.optString("tgTo", "").trim();
+        c.tgWeFrom = o.optString("tgWeFrom", "").trim();
+        c.tgWeTo = o.optString("tgWeTo", "").trim();
+        c.tgNoWe = o.optBoolean("tgNoWe", false);
         c.tsWatch = o.optBoolean("tsWatch", true);
         c.keepOpen = o.optBoolean("keepOpen", true);
         c.keepMin = Math.max(1, o.optInt("keepMin", 3));
@@ -83,6 +89,9 @@ public class Config {
             o.put("shotPass", shotPass);
             o.put("tgFrom", tgFrom);
             o.put("tgTo", tgTo);
+            o.put("tgWeFrom", tgWeFrom);
+            o.put("tgWeTo", tgWeTo);
+            o.put("tgNoWe", tgNoWe);
             o.put("tsWatch", tsWatch);
             o.put("keepOpen", keepOpen);
             o.put("keepMin", keepMin);

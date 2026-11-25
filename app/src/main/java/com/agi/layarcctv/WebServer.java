@@ -48,7 +48,7 @@ public class WebServer extends NanoHTTPD {
         if (uri.equals("/log")) {
             Map<String, String> q = session.getParms();
             if ("1".equals(q.get("clear"))) StatsLog.clear(ctx);
-            String body = "1".equals(q.get("events")) ? StatsLog.events(ctx, 300 * 1024) : StatsLog.tail(ctx, 400 * 1024);
+            String body = "1".equals(q.get("events")) ? StatsLog.events(ctx, 300 * 1024) : StatsLog.tail(ctx, 900 * 1024);
             Response r = newFixedLengthResponse(Response.Status.OK, "text/plain; charset=utf-8", body);
             r.addHeader("Content-Disposition", "inline; filename=\"layar-tv-log.txt\"");
             return r;

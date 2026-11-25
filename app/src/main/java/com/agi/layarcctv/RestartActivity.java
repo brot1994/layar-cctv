@@ -30,9 +30,27 @@ public class RestartActivity extends Activity {
                     Intent i = new Intent(RestartActivity.this, MainActivity.class);
                     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
                     startActivity(i);
-                } catch (Throwable ignored) {}
-                finish();
+                } catch (Throwable t) {
+                    try { StatsLog.append(getApplicationContext(), "[Restart] startActivity gagal: " + t); } catch (Throwable ignored) {}
+                }
             }
         }, 2500);
+        // Cadangan: bila aplikasi belum tampil setelah beberapa detik, buka lewat ADB diri sendiri (beberapa kali).
+        final android.content.Context ctx = getApplicationContext();
+        Thread t = new Thread(new Runnable() {
+            @Override public void run() {
+                for (int n = 0; n < 4; n++) {
+                    try { Thread.sleep(n == 0 ? 8000 : 15000); } catch (InterruptedException e) { break; }
+                    try {
+                        String out = AdbSelf.run(ctx, "am start -n com.agi.layarcctv/com.agi.layarcctv.MainActivity");
+                        StatsLog.append(ctx, "[Restart] cadangan ADB am start ke-" + (n + 1) + ": " + (out == null ? "" : out.trim()));
+                    } catch (Throwable e) {
+                        try { StatsLog.append(ctx, "[Restart] cadangan ADB gagal: " + e); } catch (Throwable ignored) {}
+                    }
+                }
+                finish();
+            }
+        }, "restart-backup");
+        t.start();
     }
 }

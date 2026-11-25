@@ -20,6 +20,8 @@ public class Config {
     public String tgToken = "";    // token bot Telegram (kosong = kirim otomatis mati)
     public String tgChat = "";     // ID chat tujuan
     public int tgEveryMin = 60;      // kirim foto layar tiap N menit (0 = tidak otomatis, hanya lewat perintah /foto)
+    public String tgFrom = "";       // jam mulai kirim foto otomatis (HH:mm), kosong = sepanjang hari
+    public String tgTo = "";         // jam selesai (HH:mm)
     public String decoder = "hw"; // "hw" = dekoder perangkat keras, "sw" = perangkat lunak (foto layar lengkap)
     public boolean tsWatch = true;   // cek Tailscale tiap jam, nyalakan bila mati
     public boolean keepOpen = true;  // buka aplikasi otomatis kalau tidak tampil
@@ -37,6 +39,8 @@ public class Config {
         c.networkCaching = o.optInt("networkCaching", 600);
         c.restartHours = Math.max(0, o.optInt("restartHours", 3));
         c.shotPass = o.optString("shotPass", "");
+        c.tgFrom = o.optString("tgFrom", "").trim();
+        c.tgTo = o.optString("tgTo", "").trim();
         c.tsWatch = o.optBoolean("tsWatch", true);
         c.keepOpen = o.optBoolean("keepOpen", true);
         c.keepMin = Math.max(1, o.optInt("keepMin", 3));
@@ -77,6 +81,8 @@ public class Config {
             o.put("networkCaching", networkCaching);
             o.put("restartHours", restartHours);
             o.put("shotPass", shotPass);
+            o.put("tgFrom", tgFrom);
+            o.put("tgTo", tgTo);
             o.put("tsWatch", tsWatch);
             o.put("keepOpen", keepOpen);
             o.put("keepMin", keepMin);

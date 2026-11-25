@@ -383,7 +383,7 @@ public class MainActivity extends Activity {
     private final Runnable tgTask = new Runnable() {
         @Override public void run() {
             try {
-                if (cfg != null && cfg.tgEveryMin > 0 && !cfg.tgToken.isEmpty() && !cfg.tgChat.isEmpty() && !stopped) {
+                if (cfg != null && cfg.tgEveryMin > 0 && !cfg.tgToken.isEmpty() && !cfg.tgChat.isEmpty() && !stopped && inTgWindow(cfg)) {
                     android.content.SharedPreferences sp = getSharedPreferences("tg", MODE_PRIVATE);
                     long last = sp.getLong("last", 0);
                     if (System.currentTimeMillis() - last >= cfg.tgEveryMin * 60000L) sendTelegramAsync(false);
@@ -392,6 +392,23 @@ public class MainActivity extends Activity {
             ui.postDelayed(this, 60000L);
         }
     };
+
+    /** Apakah sekarang di dalam jam kirim otomatis (kosong = sepanjang hari; boleh melewati tengah malam). */
+    private static boolean inTgWindow(Config c) {
+        try {
+            if (c.tgFrom == null || c.tgTo == null || c.tgFrom.isEmpty() || c.tgTo.isEmpty()) return true;
+            int a = hm(c.tgFrom), b = hm(c.tgTo);
+            java.util.Calendar cal = java.util.Calendar.getInstance();
+            int now = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE);
+            if (a == b) return true;
+            return a < b ? (now >= a && now < b) : (now >= a || now < b);
+        } catch (Throwable t) { return true; }
+    }
+
+    private static int hm(String s) {
+        String[] p = s.split(":");
+        return Integer.parseInt(p[0].trim()) * 60 + Integer.parseInt(p[1].trim());
+    }
 
     private void sendTelegramAsync(final boolean manual) {
         final Config c = cfg;

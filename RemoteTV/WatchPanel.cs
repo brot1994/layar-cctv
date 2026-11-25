@@ -25,7 +25,7 @@ public class WatchPanel : Panel
     readonly Label lblInfo = new();
     readonly System.Windows.Forms.Timer timer = new();
     readonly Dictionary<string, bool> lastUp = new();
-    static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(6) };
+    static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(15) };
     bool running;
     bool loading = true;
 
@@ -154,6 +154,23 @@ public class WatchPanel : Panel
         return false;
     }
 
+    // Dianggap mati hanya bila gagal 3 kali berturut-turut (jeda 20 detik), supaya gangguan sesaat tidak memicu alarm palsu.
+    static async Task<bool> IsUpRetry(string ip)
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            if (await IsUp(ip)) return true;
+            if (i < 2) await Task.Delay(20000);
+        }
+        return false;
+    }
+
+    static async Task<bool> PingOk(string ip)
+    {
+        try { using var p = new System.Net.NetworkInformation.Ping(); return (await p.SendPingAsync(ip, 2000)).Status == System.Net.NetworkInformation.IPStatus.Success; }
+        catch { return false; }
+    }
+
     async Task<bool> Revive(string ip)
     {
         string serial = ip + ":5555";
@@ -197,7 +214,7 @@ public class WatchPanel : Panel
             foreach (var tv in tvs)
             {
                 string name = string.IsNullOrWhiteSpace(tv.Name) ? tv.Ip : tv.Name;
-                bool up = await IsUp(tv.Ip);
+                bool up = await IsUpRetry(tv.Ip);
                 string state;
                 if (up)
                 {
@@ -212,13 +229,14 @@ public class WatchPanel : Panel
                 }
                 else
                 {
-                    log($"Pengawas: {name} ({tv.Ip}) tidak menjawab, mencoba membuka aplikasi...");
+                    bool ping = await PingOk(tv.Ip);
+                    log($"Pengawas: {name} ({tv.Ip}) tidak menjawab 3x (ping {(ping ? "ya" : "tidak")}), mencoba membuka aplikasi...");
                     bool ok = await Revive(tv.Ip);
                     if (ok)
                     {
                         state = "dibuka ulang";
                         lastUp[tv.Ip] = true;
-                        await Notify($"TV {name} ({tv.Ip}) tidak menjawab. Aplikasi dibuka ulang otomatis dan sudah berjalan.");
+                        await Notify($"TV {name} ({tv.Ip}) tidak menjawab 3x berturut-turut (ping ke TV: {(ping ? "ya, jaringan hidup" : "tidak, jaringan/TV putus")}). Aplikasi dibuka ulang otomatis dan sudah berjalan.");
                     }
                     else
                     {

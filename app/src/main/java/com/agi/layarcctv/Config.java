@@ -22,6 +22,8 @@ public class Config {
     public int tgEveryMin = 60;      // kirim foto layar tiap N menit (0 = tidak otomatis, hanya lewat perintah /foto)
     public String tgFrom = "";       // jam mulai kirim foto otomatis (HH:mm), kosong = sepanjang hari
     public String tgTo = "";         // jam selesai (HH:mm)
+    public String tgKerjaFrom = "";  // hari kerja: jam kerja (TIDAK kirim) mulai
+    public String tgKerjaTo = "";
     public String tgWeFrom = "";     // akhir pekan (Sabtu-Minggu): mulai; kosong = ikut hari kerja
     public String tgWeTo = "";
     public boolean tgNoWe = false;   // true = tidak kirim otomatis di akhir pekan
@@ -44,6 +46,8 @@ public class Config {
         c.shotPass = o.optString("shotPass", "");
         c.tgFrom = o.optString("tgFrom", "").trim();
         c.tgTo = o.optString("tgTo", "").trim();
+        c.tgKerjaFrom = o.optString("tgKerjaFrom", "").trim();
+        c.tgKerjaTo = o.optString("tgKerjaTo", "").trim();
         c.tgWeFrom = o.optString("tgWeFrom", "").trim();
         c.tgWeTo = o.optString("tgWeTo", "").trim();
         c.tgNoWe = o.optBoolean("tgNoWe", false);
@@ -89,6 +93,8 @@ public class Config {
             o.put("shotPass", shotPass);
             o.put("tgFrom", tgFrom);
             o.put("tgTo", tgTo);
+            o.put("tgKerjaFrom", tgKerjaFrom);
+            o.put("tgKerjaTo", tgKerjaTo);
             o.put("tgWeFrom", tgWeFrom);
             o.put("tgWeTo", tgWeTo);
             o.put("tgNoWe", tgNoWe);

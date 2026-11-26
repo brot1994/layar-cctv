@@ -83,15 +83,16 @@ small{color:#6b7280}
     <div><label>Kirim foto otomatis tiap (menit, min 5; isi 0 = mati, ambil pakai perintah /foto)</label><input id="te" type="number" value="60"></div>
   </div>
   <div class="row">
-    <div><label>Hari kerja (Sen-Jum): mulai jam</label><input id="tf" type="time"></div>
-    <div><label>sampai jam</label><input id="tu" type="time"></div>
+    <div><label>Hari kerja (Sen-Jum): JANGAN kirim mulai jam</label><span id="kf" class="t24"></span></div>
+    <div><label>sampai jam (jam kerja)</label><span id="ku" class="t24"></span></div>
   </div>
+  <small>Hari kerja: di jam kerja ini foto otomatis tidak dikirim; di luar jam kerja tetap dikirim (untuk monitoring). Kosongkan (--) = kirim sepanjang hari.</small>
   <div class="row">
-    <div><label>Akhir pekan (Sab-Min): mulai jam</label><input id="wf" type="time"></div>
-    <div><label>sampai jam</label><input id="wu" type="time"></div>
+    <div><label>Akhir pekan (Sab-Min): kirim mulai jam</label><span id="wf" class="t24"></span></div>
+    <div><label>sampai jam</label><span id="wu" class="t24"></span></div>
   </div>
   <label style="display:flex;gap:8px;align-items:center"><input id="wn" type="checkbox" style="width:auto"> Tidak kirim otomatis di akhir pekan</label>
-  <small>Kosongkan kolom hari kerja = sepanjang hari. Kolom akhir pekan kosong = sama dengan hari kerja. Di luar jam ini foto otomatis tidak dikirim; perintah /foto tetap bisa kapan saja.</small>
+  <small>Akhir pekan: kosongkan (--) = kirim reguler sepanjang hari. Format 24 jam. Perintah /foto tetap bisa kapan saja.</small>
   <button class="pri" onclick="ctl('tg');msg('Perintah kirim ke Telegram dikirim. Cek chat Telegram atau log TV.', true)">Kirim foto ke Telegram sekarang</button>
   <small>Isi dulu lalu klik Simpan, baru tombol kirim. Hasil tiap pengiriman tercatat di log TV dengan awalan [Telegram].</small>
   <label style="display:flex;gap:8px;align-items:center"><input id="tw" type="checkbox" style="width:auto" checked> Cek Tailscale tiap jam, nyalakan bila mati</label>
@@ -187,10 +188,8 @@ function render() {
   document.getElementById('dc').value = (CFG.decoder === 'sw') ? 'sw' : 'hw';
   document.getElementById('tt').value = CFG.tgToken || '';
   document.getElementById('tc').value = CFG.tgChat || '';
-  document.getElementById('tf').value = CFG.tgFrom || '';
-  document.getElementById('tu').value = CFG.tgTo || '';
-  document.getElementById('wf').value = CFG.tgWeFrom || '';
-  document.getElementById('wu').value = CFG.tgWeTo || '';
+  setT('kf', CFG.tgKerjaFrom); setT('ku', CFG.tgKerjaTo);
+  setT('wf', CFG.tgWeFrom); setT('wu', CFG.tgWeTo);
   document.getElementById('wn').checked = !!CFG.tgNoWe;
   document.getElementById('te').value = (CFG.tgEveryMin === 0 ? 0 : (CFG.tgEveryMin || 60));
   document.getElementById('tw').checked = (CFG.tsWatch !== false);
@@ -330,10 +329,8 @@ function collect() {
     decoder: document.getElementById('dc').value,
     tgToken: document.getElementById('tt').value.trim(),
     tgChat: document.getElementById('tc').value.trim(),
-    tgFrom: document.getElementById('tf').value || '',
-    tgTo: document.getElementById('tu').value || '',
-    tgWeFrom: document.getElementById('wf').value || '',
-    tgWeTo: document.getElementById('wu').value || '',
+    tgKerjaFrom: getT('kf'), tgKerjaTo: getT('ku'),
+    tgWeFrom: getT('wf'), tgWeTo: getT('wu'),
     tgNoWe: document.getElementById('wn').checked,
     tgEveryMin: (function(){ var v = parseInt(document.getElementById('te').value); if (isNaN(v)) return 60; return v <= 0 ? 0 : Math.max(5, v); })(),
     tsWatch: document.getElementById('tw').checked,
@@ -423,6 +420,20 @@ function pollStatus() {
 setInterval(pollStatus, 3000);
 
 load();
+</script>
+<script>
+// Pemilih jam format 24 jam (tanpa AM/PM)
+function buildT(id){
+  var el=document.getElementById(id); if(!el||el.dataset.b) return; el.dataset.b=1;
+  var h='<select style="width:48%"><option value="">--</option>', m='<select style="width:48%"><option value="">--</option>';
+  for(var i=0;i<24;i++) h+='<option value="'+('0'+i).slice(-2)+'">'+('0'+i).slice(-2)+'</option>';
+  for(var j=0;j<60;j+=5) m+='<option value="'+('0'+j).slice(-2)+'">'+('0'+j).slice(-2)+'</option>';
+  el.innerHTML=h+'</select> : '+m+'</select>';
+}
+function setT(id,v){ buildT(id); var s=document.getElementById(id).getElementsByTagName('select'); var p=(v||'').split(':');
+  s[0].value=p[0]||''; s[1].value=(p[1]||'').length?p[1]:(p[0]?'00':''); }
+function getT(id){ buildT(id); var s=document.getElementById(id).getElementsByTagName('select'); if(!s[0].value) return ''; return s[0].value+':'+(s[1].value||'00'); }
+['kf','ku','wf','wu'].forEach(buildT);
 </script>
 </body>
 </html>

@@ -399,19 +399,21 @@ public class MainActivity extends Activity {
             java.util.Calendar cal = java.util.Calendar.getInstance();
             int dow = cal.get(java.util.Calendar.DAY_OF_WEEK);
             boolean weekend = dow == java.util.Calendar.SATURDAY || dow == java.util.Calendar.SUNDAY;
-            String from = c.tgFrom, to = c.tgTo;
+            int now = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE);
             if (weekend) {
                 if (c.tgNoWe) return false;
-                if (c.tgWeFrom != null && !c.tgWeFrom.isEmpty() && c.tgWeTo != null && !c.tgWeTo.isEmpty()) {
-                    from = c.tgWeFrom; to = c.tgWeTo;
-                }
+                if (c.tgWeFrom == null || c.tgWeTo == null || c.tgWeFrom.isEmpty() || c.tgWeTo.isEmpty()) return true;
+                return within(now, hm(c.tgWeFrom), hm(c.tgWeTo));
             }
-            if (from == null || to == null || from.isEmpty() || to.isEmpty()) return true;
-            int a = hm(from), b = hm(to);
-            int now = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE);
-            if (a == b) return true;
-            return a < b ? (now >= a && now < b) : (now >= a || now < b);
+            // Hari kerja: jam kerja = TIDAK kirim; di luar itu kirim.
+            if (c.tgKerjaFrom == null || c.tgKerjaTo == null || c.tgKerjaFrom.isEmpty() || c.tgKerjaTo.isEmpty()) return true;
+            return !within(now, hm(c.tgKerjaFrom), hm(c.tgKerjaTo));
         } catch (Throwable t) { return true; }
+    }
+
+    private static boolean within(int now, int a, int b) {
+        if (a == b) return true;
+        return a < b ? (now >= a && now < b) : (now >= a || now < b);
     }
 
     private static int hm(String s) {

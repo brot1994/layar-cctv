@@ -172,7 +172,35 @@ public class MainActivity extends Activity {
     private final Object shotLock = new Object();
 
     private byte[] takeShot() {
-        synchronized (shotLock) { return takeShotInner(); }
+        synchronized (shotLock) {
+            byte[] r = takeShotInner();
+            if (r != null && lastShotBlack) {
+                StatsLog.log("[Telegram] foto hitam terdeteksi, mencoba lagi 6 detik lagi");
+                try { Thread.sleep(6000); } catch (InterruptedException ignored) {}
+                r = takeShotInner();
+                if (r != null && lastShotBlack) {
+                    StatsLog.log("[Telegram] foto tetap hitam (layar kosong/TV standby?), tidak dikirim");
+                    return null;
+                }
+            }
+            return r;
+        }
+    }
+
+    private volatile boolean lastShotBlack = false;
+
+    /** true bila hampir seluruh piksel (sampel) gelap. */
+    private static boolean mostlyBlack(android.graphics.Bitmap b) {
+        int w = b.getWidth(), h = b.getHeight(), dark = 0, n = 0;
+        for (int y = 4; y < h; y += Math.max(8, h / 40)) {
+            for (int x = 4; x < w; x += Math.max(8, w / 64)) {
+                int p = b.getPixel(x, y);
+                int lum = (((p >> 16) & 255) * 3 + ((p >> 8) & 255) * 6 + (p & 255)) / 10;
+                if (lum < 12) dark++;
+                n++;
+            }
+        }
+        return n > 0 && dark * 100 / n >= 97;
     }
 
     private byte[] takeShotInner() {
@@ -263,6 +291,7 @@ public class MainActivity extends Activity {
         }
         try {
             android.graphics.Bitmap b = bmp[0];
+            lastShotBlack = mostlyBlack(b);
             if (b.getWidth() > 1280) {
                 int nh = Math.round(b.getHeight() * 1280f / b.getWidth());
                 android.graphics.Bitmap sm = android.graphics.Bitmap.createScaledBitmap(b, 1280, nh, true);

@@ -68,6 +68,9 @@ final class TvStore {
         return null;
     }
 
+    String getExtra(String k) { return sp.getString("x_" + k, ""); }
+    void setExtra(String k, String v) { sp.edit().putString("x_" + k, v).apply(); }
+
     String lastIp() { return sp.getString("last", ""); }
     void setLastIp(String ip) { sp.edit().putString("last", ip).apply(); }
 }

@@ -72,7 +72,7 @@ public class MainActivity extends Activity {
 
     // ---- halaman ----
     private FrameLayout root;
-    private View pageRemote, pageTv, pageScreen, pageInstall, current;
+    private View pageRemote, pageTv, pageScreen, pageInstall, pageMore, pageHome, current;
     private TextView tvChip, statusTxt;
     private LinearLayout typePanel;
     private EditText typeEdit;
@@ -107,7 +107,9 @@ public class MainActivity extends Activity {
         pageTv = buildTvPage();
         pageScreen = buildScreenPage();
         pageInstall = buildInstallPage();
-        for (View v : new View[]{pageRemote, pageTv, pageScreen, pageInstall}) {
+        pageMore = buildMorePage();
+        pageHome = buildHomePage();
+        for (View v : allPages()) {
             v.setVisibility(View.GONE);
             root.addView(v, new FrameLayout.LayoutParams(-1, -1));
         }
@@ -184,11 +186,16 @@ public class MainActivity extends Activity {
     private void show(View page) {
         if (current == pageScreen && page != pageScreen) screenOn = false;
         if (current == pageTv && page != pageTv) scanning = false;
-        for (View v : new View[]{pageRemote, pageTv, pageScreen, pageInstall}) v.setVisibility(v == page ? View.VISIBLE : View.GONE);
+        for (View v : allPages()) v.setVisibility(v == page ? View.VISIBLE : View.GONE);
         current = page;
         if (page == pageTv) refreshTvList();
         if (page == pageScreen) startScreen();
+        if (page == pageHome) checkHome();
         if (page != pageRemote) closeTyping();
+    }
+
+    private View[] allPages() {
+        return new View[]{pageRemote, pageTv, pageScreen, pageInstall, pageMore, pageHome};
     }
 
     // ================================================================= koneksi
@@ -203,6 +210,17 @@ public class MainActivity extends Activity {
                     () -> status(AMBER, "Lihat layar TV: centang \"Selalu izinkan\" lalu pilih Izinkan / OK"));
             conn = c;
             status(GREEN, "Tersambung · " + t.label());
+            // simpan alamat MAC TV untuk Wake-on-LAN
+            try {
+                String o = c.shell("cat /sys/class/net/wlan0/address /sys/class/net/eth0/address 2>/dev/null", 5000);
+                StringBuilder macs = new StringBuilder();
+                for (String line : o.split("\\s+")) {
+                    String m = line.trim().toLowerCase(Locale.US);
+                    if (m.matches("([0-9a-f]{2}:){5}[0-9a-f]{2}") && !m.equals("00:00:00:00:00:00") && !m.equals("02:00:00:00:00:00"))
+                        macs.append(m).append(' ');
+                }
+                if (macs.length() > 0) store.setExtra("mac_" + t.ip, macs.toString().trim());
+            } catch (Exception ignored) { }
             if (t.name == null || t.name.trim().isEmpty()) {
                 try {
                     String n = c.shell("settings get global device_name", 5000);
@@ -443,7 +461,7 @@ public class MainActivity extends Activity {
         tvChip.setOnClickListener(v -> show(pageTv));
         top.addView(tvChip, new LinearLayout.LayoutParams(0, -2, 1f));
         TextView bScreen = actionBtn("Layar", KEY, v -> show(pageScreen));
-        TextView bApk = actionBtn("APK", KEY, v -> show(pageInstall));
+        TextView bApk = actionBtn("Lainnya", KEY, v -> show(pageMore));
         LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(-2, -2);
         lp1.leftMargin = dp(8);
         top.addView(bScreen, lp1);
@@ -460,7 +478,10 @@ public class MainActivity extends Activity {
         p.addView(space(1));
 
         // Power + Input
-        TextView power = keyBtn("⏻", K_POWER, RED, false, 24, true);
+        TextView power = actionBtn("⏻", RED, v -> powerPress());
+        power.setBackground(keyBg(RED, 0, true));
+        power.setTextSize(24);
+        power.setPadding(0, 0, 0, 0);
         TextView input = keyBtn("⇄ Input", K_INPUT, KEY, false, 16, false);
         LinearLayout r1 = new LinearLayout(this);
         r1.setGravity(Gravity.CENTER_VERTICAL);
@@ -473,7 +494,7 @@ public class MainActivity extends Activity {
 
         // D-pad dalam lingkaran
         int w = getResources().getDisplayMetrics().widthPixels - dp(28);
-        int pad = Math.min(w, dp(330));
+        int pad = Math.min(w, dp(300));
         int cell = pad / 3;
         FrameLayout ring = new FrameLayout(this);
         ring.setBackground(shape(PANEL, 0, true));
@@ -498,6 +519,10 @@ public class MainActivity extends Activity {
         TextView kb = actionBtn("⌨ Ketik", BLUE, v -> openTyping());
         p.addView(row(58, keyBtn("⏯", K_PLAY, KEY, false, 20, false),
                 keyBtn("⌫", K_DEL, KEY, true, 20, false), kb));
+        p.addView(row(50, appBtn("YouTube", "com.google.android.youtube.tv", 0xFFC4302B),
+                appBtn("Netflix", "com.netflix.ninja", 0xFF141414),
+                appBtn("Disney+", "com.disney.disneyplus", 0xFF113CCF),
+                appBtn("Spotify", "com.spotify.tv.android", 0xFF1DB954)));
         return p;
     }
 
@@ -899,6 +924,7 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
         if (req == REQ_APK && res == RESULT_OK && data != null && data.getData() != null) setApk(data.getData());
+        if (req == REQ_WALL && res == RESULT_OK && data != null && data.getData() != null) sendWall(data.getData());
     }
 
     private String[] nameSize(Uri u) {
@@ -992,6 +1018,419 @@ public class MainActivity extends Activity {
                 ui.post(() -> installBar.setProgress(1000));
             }
         });
+    }
+
+    // ================================================================= tombol power + Wake-on-LAN
+
+    private void powerPress() {
+        bg.execute(() -> {
+            TvStore.Tv t = cur;
+            if (t == null) { status(ERRC, "Pilih TV dulu."); return; }
+            boolean ok;
+            synchronized (connLock) { ok = conn != null && conn.isAlive(); }
+            if (!ok) {
+                try { conn(); ok = true; } catch (Exception ignored) { }
+            }
+            if (ok) { key(K_POWER); return; }
+            String mac = store.getExtra("mac_" + t.ip);
+            if (mac.isEmpty()) {
+                status(ERRC, "TV tidak terjangkau (mati/standby). Wake-on-LAN belum siap: sambungkan HP sekali saat TV menyala supaya alamat TV tersimpan.");
+                return;
+            }
+            try {
+                for (String m : mac.split(" ")) sendWol(m, t.host());
+                status(AMBER, "Sinyal bangun (Wake-on-LAN) dikirim. Bila TV mendukung, TV menyala dalam beberapa detik…");
+                Thread.sleep(6000);
+                conn();
+            } catch (Exception e) {
+                status(ERRC, "TV belum menyala. Pastikan \"Quick start / Standby jaringan\" aktif di setelan daya TV.");
+            }
+        });
+    }
+
+    private static void sendWol(String mac, String host) throws Exception {
+        String[] hx = mac.split(":");
+        byte[] m = new byte[6];
+        for (int i = 0; i < 6; i++) m[i] = (byte) Integer.parseInt(hx[i], 16);
+        byte[] pkt = new byte[6 + 16 * 6];
+        for (int i = 0; i < 6; i++) pkt[i] = (byte) 0xff;
+        for (int i = 6; i < pkt.length; i += 6) System.arraycopy(m, 0, pkt, i, 6);
+        String[] parts = host.split("\\.");
+        String sub = parts.length == 4 ? parts[0] + "." + parts[1] + "." + parts[2] + ".255" : null;
+        Scanner.Net net = Scanner.myNet();
+        String netB = net != null ? Scanner.str(net.base | ((1 << (32 - net.prefix)) - 1)) : null;
+        try (java.net.DatagramSocket ds = new java.net.DatagramSocket()) {
+            ds.setBroadcast(true);
+            for (String dst : new String[]{"255.255.255.255", netB, sub, host}) {
+                if (dst == null) continue;
+                for (int port : new int[]{9, 7}) {
+                    try {
+                        ds.send(new java.net.DatagramPacket(pkt, pkt.length, java.net.InetAddress.getByName(dst), port));
+                    } catch (Exception ignored) { }
+                }
+            }
+        }
+    }
+
+    // ================================================================= shortcut aplikasi
+
+    private TextView appBtn(String name, String pkg, int color) {
+        TextView b = actionBtn(name, color, v -> openTvApp(name, pkg));
+        b.setTextSize(13);
+        b.setPadding(dp(4), dp(8), dp(4), dp(8));
+        b.setSingleLine(true);
+        return b;
+    }
+
+    private void openTvApp(String name, String pkg) {
+        bg.execute(() -> {
+            try {
+                AdbConn c = conn();
+                String path = c.shell("pm path " + pkg, 8000);
+                if (!path.contains("package:")) { status(AMBER, name + " belum terpasang di TV ini."); return; }
+                String out = c.shell("monkey -p " + pkg + " -c android.intent.category.LEANBACK_LAUNCHER 1", 15000);
+                if (out.contains("No activities")) c.shell("monkey -p " + pkg + " -c android.intent.category.LAUNCHER 1", 15000);
+                status(GREEN, "Membuka " + name + " di " + cur.label());
+            } catch (Exception e) {
+                status(ERRC, e.getMessage());
+            }
+        });
+    }
+
+    // ================================================================= halaman LAINNYA
+
+    private View buildMorePage() {
+        LinearLayout p = vbox();
+        p.setPadding(dp(14), dp(14), dp(14), dp(14));
+        p.addView(header("Lainnya"));
+        View gap = new View(this);
+        p.addView(gap, new LinearLayout.LayoutParams(1, dp(12)));
+        p.addView(menuItem("Pasang aplikasi ke TV", "Kirim file APK dari HP lalu pasang", () -> show(pageInstall)));
+        p.addView(menuItem("Beranda TV", "Layar utama TV sendiri: wallpaper foto/video, tanpa iklan", () -> show(pageHome)));
+        p.addView(menuItem("Pilih / cari TV", "Daftar TV, cari di WiFi, IP manual", () -> show(pageTv)));
+        return p;
+    }
+
+    private View menuItem(String title, String sub, Runnable r) {
+        LinearLayout b = vbox();
+        b.setPadding(dp(18), dp(16), dp(18), dp(16));
+        b.setBackground(keyBg(PANEL, 14, false));
+        b.addView(label(title, 18, TXT, true));
+        b.addView(label(sub, 13, DIM, false));
+        b.setOnClickListener(v -> r.run());
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.setMargins(dp(5), dp(6), dp(5), dp(6));
+        b.setLayoutParams(lp);
+        return b;
+    }
+
+    // ================================================================= halaman BERANDA TV
+
+    private static final String HOME_PKG = "com.agi.berandatv";
+    private static final String HOME_CMP = HOME_PKG + "/.HomeActivity";
+    /** Beranda bawaan Google TV / Android TV yang dikenal. */
+    private static final String[] STOCK_HOMES = {
+            "com.google.android.apps.tv.launcherx", "com.google.android.tvlauncher",
+            "com.google.android.leanbacklauncher", "com.google.android.tungsten.setupwraith"};
+    private static final int REQ_WALL = 12;
+
+    private TextView homeState, homeLog;
+    private ProgressBar homeBar;
+    private volatile boolean homeBusy;
+
+    private View buildHomePage() {
+        ScrollView sv = new ScrollView(this);
+        LinearLayout p = vbox();
+        p.setPadding(dp(14), dp(14), dp(14), dp(24));
+        sv.addView(p);
+        p.addView(header("Beranda TV"));
+
+        homeState = label("Memeriksa TV…", 14, DIM, false);
+        homeState.setPadding(dp(6), dp(12), dp(6), dp(10));
+        p.addView(homeState);
+
+        p.addView(row(56, actionBtn("1. Pasang / perbarui Beranda TV", KEY, v -> homeInstall())));
+        p.addView(row(56, actionBtn("2. Jadikan layar utama TV", BLUE, v -> homeSet(false))));
+        p.addView(row(56, actionBtn("Ganti wallpaper (foto / video MP4)", KEY, v -> pickWall())));
+        p.addView(row(56, actionBtn("Kembalikan beranda bawaan", KEY, v -> homeRestore())));
+
+        homeBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        homeBar.setMax(1000);
+        homeBar.setVisibility(View.GONE);
+        LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(-1, dp(14));
+        bl.setMargins(dp(6), dp(12), dp(6), dp(6));
+        p.addView(homeBar, bl);
+
+        homeLog = label("", 14, TXT, false);
+        homeLog.setPadding(dp(6), dp(6), dp(6), dp(6));
+        homeLog.setLineSpacing(dp(2), 1f);
+        p.addView(homeLog);
+
+        TextView adv = label("Kalau tombol Home di remote TV masih ke beranda Google:", 13, DIM, false);
+        adv.setPadding(dp(6), dp(18), dp(6), 0);
+        p.addView(adv);
+        p.addView(row(52, actionBtn("Mode kuat (matikan beranda Google)", 0xFF7C2D12, v ->
+                new AlertDialog.Builder(this)
+                        .setTitle("Mode kuat")
+                        .setMessage("Beranda Google di TV akan dinonaktifkan (tidak dihapus) supaya tombol Home selalu ke Beranda TV. "
+                                + "Bisa dikembalikan kapan saja dengan tombol \"Kembalikan beranda bawaan\". Lanjut?")
+                        .setPositiveButton("Lanjut", (d, w) -> homeSet(true))
+                        .setNegativeButton("Batal", null)
+                        .show())));
+
+        TextView help = label("Video wallpaper: MP4 pendek (5–30 detik) diputar berulang tanpa suara, "
+                + "dan berhenti otomatis saat aplikasi lain dibuka. Foto diperkecil otomatis ke ukuran layar TV.\n"
+                + "Di TV: tekan lama OK (atau tombol Menu) pada ikon untuk Info / Copot / Hapus dari favorit. "
+                + "Favorit terisi sendiri dari aplikasi yang paling sering dibuka.", 13, DIM, false);
+        help.setPadding(dp(6), dp(18), dp(6), 0);
+        help.setLineSpacing(dp(2), 1f);
+        p.addView(help);
+        return sv;
+    }
+
+    private void hlog(String s) { ui.post(() -> homeLog.append(s + "\n")); }
+
+    private void homeStart() {
+        homeBusy = true;
+        ui.post(() -> { homeLog.setText(""); homeBar.setVisibility(View.GONE); });
+    }
+
+    private String currentHome(AdbConn c) throws Exception {
+        String o = c.shell("cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME", 10000);
+        String last = "";
+        for (String line : o.split("\n")) if (line.trim().contains("/")) last = line.trim();
+        return last;
+    }
+
+    private void checkHome() {
+        if (cur == null) { homeState.setText("Pilih TV dulu."); return; }
+        homeState.setText("Memeriksa " + cur.label() + " …");
+        bg.execute(() -> {
+            try {
+                AdbConn c = conn();
+                boolean inst = c.shell("pm path " + HOME_PKG, 8000).contains("package:");
+                String home = inst ? currentHome(c) : "";
+                String msg = !inst ? "Beranda TV belum terpasang di " + cur.label() + "."
+                        : home.startsWith(HOME_PKG) ? "✔ Beranda TV terpasang dan jadi layar utama."
+                        : "Beranda TV sudah terpasang, tapi layar utama masih: " + (home.isEmpty() ? "(tidak diketahui)" : home);
+                ui.post(() -> homeState.setText(msg));
+            } catch (Exception e) {
+                ui.post(() -> homeState.setText("✖ " + e.getMessage()));
+            }
+        });
+    }
+
+    private void homeInstall() {
+        if (homeBusy) return;
+        homeStart();
+        bg.execute(() -> {
+            File tmp = new File(getCacheDir(), "beranda.apk");
+            try {
+                try (InputStream is = getAssets().open("beranda.apk"); FileOutputStream fo = new FileOutputStream(tmp)) {
+                    byte[] buf = new byte[65536];
+                    int n;
+                    while ((n = is.read(buf)) > 0) fo.write(buf, 0, n);
+                }
+                AdbConn c = conn();
+                hlog("Mengirim Beranda TV ke " + cur.label() + " …");
+                ui.post(() -> { homeBar.setProgress(0); homeBar.setVisibility(View.VISIBLE); });
+                String out;
+                try (InputStream is = new FileInputStream(tmp)) {
+                    out = c.installStream(is, tmp.length(), (d, t) -> ui.post(() -> homeBar.setProgress((int) (d * 1000 / Math.max(1, t)))));
+                }
+                if (!out.contains("Success") && !out.contains("Failure")) {
+                    try (InputStream is = new FileInputStream(tmp)) { c.push(is, tmp.length(), "/data/local/tmp/beranda.apk", null); }
+                    out = c.shell("pm install -r /data/local/tmp/beranda.apk", 240000);
+                    c.shell("rm -f /data/local/tmp/beranda.apk", 10000);
+                }
+                if (out.contains("Success")) hlog("✔ Beranda TV terpasang. Lanjut langkah 2.");
+                else hlog("✖ Gagal: " + out);
+            } catch (Exception e) {
+                hlog("✖ " + e.getMessage());
+            } finally {
+                //noinspection ResultOfMethodCallIgnored
+                tmp.delete();
+                homeBusy = false;
+                ui.post(this::checkHome);
+            }
+        });
+    }
+
+    private void homeSet(boolean strong) {
+        if (homeBusy) return;
+        homeStart();
+        bg.execute(() -> {
+            try {
+                AdbConn c = conn();
+                if (!c.shell("pm path " + HOME_PKG, 8000).contains("package:")) {
+                    hlog("Beranda TV belum terpasang. Tekan langkah 1 dulu.");
+                    return;
+                }
+                if (strong) {
+                    StringBuilder disabled = new StringBuilder();
+                    for (String pkg : STOCK_HOMES) {
+                        if (!c.shell("pm path " + pkg, 8000).contains("package:")) continue;
+                        String o = c.shell("pm disable-user --user 0 " + pkg, 15000);
+                        hlog("Nonaktifkan " + pkg + ": " + (o.contains("disabled") ? "OK" : o));
+                        disabled.append(pkg).append(' ');
+                    }
+                    store.setExtra("disabled_" + cur.ip, disabled.toString().trim());
+                }
+                String o = c.shell("cmd package set-home-activity --user 0 " + HOME_CMP, 15000);
+                if (o.toLowerCase(Locale.US).contains("error") || o.toLowerCase(Locale.US).contains("unknown"))
+                    o = c.shell("cmd package set-home-activity " + HOME_CMP, 15000);
+                hlog("Jadikan layar utama: " + (o.isEmpty() ? "OK" : o));
+                c.shell("input keyevent 3", 8000);
+                String home = currentHome(c);
+                if (home.startsWith(HOME_PKG)) hlog("✔ Selesai. Tekan Home di remote untuk mencoba.");
+                else hlog("Layar utama masih " + home + ". Coba \"Mode kuat\" di bawah.");
+            } catch (Exception e) {
+                hlog("✖ " + e.getMessage());
+            } finally {
+                homeBusy = false;
+                ui.post(this::checkHome);
+            }
+        });
+    }
+
+    private void homeRestore() {
+        if (homeBusy) return;
+        homeStart();
+        bg.execute(() -> {
+            try {
+                AdbConn c = conn();
+                String saved = store.getExtra("disabled_" + cur.ip);
+                java.util.LinkedHashSet<String> pk = new java.util.LinkedHashSet<>();
+                for (String s : saved.split(" ")) if (!s.isEmpty()) pk.add(s);
+                for (String s : STOCK_HOMES) pk.add(s);
+                for (String s : pk) {
+                    if (!c.shell("pm path " + s, 8000).contains("package:")) continue;
+                    c.shell("pm enable " + s, 15000);
+                }
+                store.setExtra("disabled_" + cur.ip, "");
+                // cari beranda bawaan yang tersedia
+                String q = c.shell("cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME", 10000);
+                String stock = "";
+                for (String line : q.split("\n")) {
+                    String l = line.trim();
+                    if (!l.contains("/") || l.startsWith(HOME_PKG) || l.contains("FallbackHome") || l.contains("setupwraith")) continue;
+                    if (stock.isEmpty() || l.contains("launcherx")) stock = l;
+                }
+                if (stock.isEmpty()) {
+                    hlog("Beranda bawaan tidak ditemukan. Hapus Beranda TV dari Info aplikasi di TV bila perlu.");
+                } else {
+                    String o = c.shell("cmd package set-home-activity --user 0 " + stock, 15000);
+                    if (o.toLowerCase(Locale.US).contains("error")) c.shell("cmd package set-home-activity " + stock, 15000);
+                    c.shell("input keyevent 3", 8000);
+                    hlog("✔ Beranda bawaan dikembalikan: " + stock);
+                }
+            } catch (Exception e) {
+                hlog("✖ " + e.getMessage());
+            } finally {
+                homeBusy = false;
+                ui.post(this::checkHome);
+            }
+        });
+    }
+
+    private void pickWall() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/mp4"});
+        try { startActivityForResult(i, REQ_WALL); }
+        catch (Exception e) {
+            Intent g = new Intent(Intent.ACTION_GET_CONTENT);
+            g.setType("image/*");
+            startActivityForResult(g, REQ_WALL);
+        }
+    }
+
+    private void sendWall(Uri u) {
+        if (homeBusy) return;
+        homeStart();
+        bg.execute(() -> {
+            File tmp = null;
+            try {
+                String type = getContentResolver().getType(u);
+                String[] ns = nameSize(u);
+                boolean video = (type != null && type.startsWith("video")) || ns[0].toLowerCase(Locale.US).endsWith(".mp4");
+                String ext = video ? "mp4" : "jpg";
+                tmp = new File(getCacheDir(), "wall." + ext);
+                if (video) {
+                    try (InputStream is = getContentResolver().openInputStream(u); FileOutputStream fo = new FileOutputStream(tmp)) {
+                        byte[] buf = new byte[65536];
+                        int n;
+                        while ((n = is.read(buf)) > 0) fo.write(buf, 0, n);
+                    }
+                    if (tmp.length() > 40L * 1048576) hlog("Catatan: video cukup besar (" + (tmp.length() / 1048576) + " MB). Video pendek lebih ringan untuk TV.");
+                } else {
+                    hlog("Menyiapkan foto…");
+                    makeWallJpeg(u, tmp);
+                }
+                AdbConn c = conn();
+                if (!c.shell("pm path " + HOME_PKG, 8000).contains("package:")) {
+                    hlog("Beranda TV belum terpasang. Tekan langkah 1 dulu.");
+                    return;
+                }
+                long size = tmp.length();
+                hlog(String.format(Locale.US, "Mengirim wallpaper (%.1f MB) …", size / 1048576f));
+                ui.post(() -> { homeBar.setProgress(0); homeBar.setVisibility(View.VISIBLE); });
+                AdbConn.Progress pr = (d, t) -> ui.post(() -> homeBar.setProgress((int) (d * 1000 / Math.max(1, t))));
+                String script = "mkdir -p files && head -c " + size + " > files/wall.tmp && rm -f files/wall.jpg files/wall.png files/wall.mp4"
+                        + " && mv files/wall.tmp files/wall." + ext + " && echo WALL_OK";
+                String out;
+                try (InputStream is = new FileInputStream(tmp)) {
+                    out = c.execWithInput("run-as " + HOME_PKG + " sh -c '" + script + "'", is, size, pr);
+                }
+                if (!out.contains("WALL_OK")) {
+                    hlog("Cara cepat tidak bisa (" + out.trim() + "), pakai cara cadangan…");
+                    c.shell("mkdir -p /sdcard/BerandaTV && rm -f /sdcard/BerandaTV/wall.*", 10000);
+                    try (InputStream is = new FileInputStream(tmp)) {
+                        c.push(is, size, "/sdcard/BerandaTV/wall." + ext, pr);
+                    }
+                    for (String perm : new String[]{"READ_EXTERNAL_STORAGE", "READ_MEDIA_IMAGES", "READ_MEDIA_VIDEO"})
+                        c.shell("pm grant " + HOME_PKG + " android.permission." + perm, 8000);
+                }
+                c.shell("am start -n " + HOME_CMP + " --ez reload true", 10000);
+                hlog("✔ Wallpaper terpasang di " + cur.label() + ".");
+            } catch (Exception e) {
+                hlog("✖ " + e.getMessage());
+            } finally {
+                if (tmp != null) //noinspection ResultOfMethodCallIgnored
+                    tmp.delete();
+                homeBusy = false;
+            }
+        });
+    }
+
+    /** Perkecil foto ke maks. 1920×1080 (dengan rotasi EXIF) lalu simpan JPEG. */
+    private void makeWallJpeg(Uri u, File out) throws Exception {
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        try (InputStream is = getContentResolver().openInputStream(u)) { BitmapFactory.decodeStream(is, null, o); }
+        if (o.outWidth <= 0) throw new Exception("File gambar tidak terbaca.");
+        int s = 1;
+        while (o.outWidth / (s * 2) >= 1920 || o.outHeight / (s * 2) >= 1920) s *= 2;
+        BitmapFactory.Options o2 = new BitmapFactory.Options();
+        o2.inSampleSize = s;
+        Bitmap b;
+        try (InputStream is = getContentResolver().openInputStream(u)) { b = BitmapFactory.decodeStream(is, null, o2); }
+        if (b == null) throw new Exception("File gambar tidak terbaca.");
+        int rot = 0;
+        if (android.os.Build.VERSION.SDK_INT >= 24) {
+            try (InputStream is = getContentResolver().openInputStream(u)) {
+                android.media.ExifInterface ex = new android.media.ExifInterface(is);
+                int or = ex.getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1);
+                rot = or == 6 ? 90 : or == 3 ? 180 : or == 8 ? 270 : 0;
+            } catch (Exception ignored) { }
+        }
+        float sc = Math.min(1f, 1920f / Math.max(b.getWidth(), b.getHeight()));
+        Matrix m = new Matrix();
+        m.postScale(sc, sc);
+        if (rot != 0) m.postRotate(rot);
+        Bitmap r = Bitmap.createBitmap(b, 0, 0, b.getWidth(), b.getHeight(), m, true);
+        try (FileOutputStream fo = new FileOutputStream(out)) { r.compress(Bitmap.CompressFormat.JPEG, 90, fo); }
     }
 
     @Override

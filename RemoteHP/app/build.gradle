@@ -10,8 +10,8 @@ android {
         applicationId "com.agi.remotetv"
         minSdk 21
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.1"
     }
 
     // Kunci tetap (di repo) supaya build berikutnya bisa dipasang menimpa versi lama

@@ -353,6 +353,24 @@ final class AdbConn {
         return new String(s.readAll(180000), StandardCharsets.UTF_8).trim();
     }
 
+    /** Jalankan perintah lalu alirkan data ke stdin-nya (perintah harus membaca tepat "size" byte). */
+    String execWithInput(String cmd, InputStream src, long size, Progress p) throws Exception {
+        Stream s = open("exec:" + cmd, 10000);
+        byte[] buf = new byte[64 * 1024];
+        long done = 0;
+        int n;
+        try {
+            while (done < size && (n = src.read(buf, 0, (int) Math.min(buf.length, size - done))) > 0) {
+                s.write(buf, 0, n);
+                done += n;
+                if (p != null) p.onProgress(done, size);
+            }
+        } catch (Exception e) {
+            if (!s.closed) throw e;
+        }
+        return new String(s.readAll(120000), StandardCharsets.UTF_8).trim();
+    }
+
     /** Kirim file ke TV lewat protokol sync (cadangan untuk TV lama). */
     void push(InputStream src, long size, String remotePath, Progress p) throws Exception {
         Stream s = open("sync:", 10000);

@@ -18,7 +18,6 @@ import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.PrivateKey;
 import java.security.Signature;
-import java.security.interfaces.RSAPrivateCrtKey;
 import java.security.spec.PKCS8EncodedKeySpec;
 
 /**
@@ -65,9 +64,10 @@ final class AdbSelf {
             byte[] b = new byte[(int) f.length()];
             try (FileInputStream in = new FileInputStream(f)) { new DataInputStream(in).readFully(b); }
             PrivateKey pk = KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(b));
-            RSAPrivateCrtKey crt = (RSAPrivateCrtKey) pk;
+            // Kunci yang dimuat dari file bukan selalu RSAPrivateCrtKey (ClassCastException di Android TV): pakai RSAPrivateKey + eksponen publik 65537.
+            java.security.interfaces.RSAPrivateKey rk = (java.security.interfaces.RSAPrivateKey) pk;
             java.security.PublicKey pub = KeyFactory.getInstance("RSA").generatePublic(
-                    new java.security.spec.RSAPublicKeySpec(crt.getModulus(), crt.getPublicExponent()));
+                    new java.security.spec.RSAPublicKeySpec(rk.getModulus(), BigInteger.valueOf(65537)));
             return new KeyPair(pub, pk);
         }
         KeyPairGenerator g = KeyPairGenerator.getInstance("RSA");
@@ -85,14 +85,14 @@ final class AdbSelf {
     }
 
     private static byte[] androidPubKey(KeyPair kp) {
-        RSAPrivateCrtKey k = (RSAPrivateCrtKey) kp.getPrivate();
+        java.security.interfaces.RSAPrivateKey k = (java.security.interfaces.RSAPrivateKey) kp.getPrivate();
         BigInteger n = k.getModulus();
         BigInteger r32 = BigInteger.ONE.shiftLeft(32);
         long n0inv = r32.subtract(n.mod(r32).modInverse(r32)).longValue();
         BigInteger rr = BigInteger.ONE.shiftLeft(4096).mod(n);
         java.nio.ByteBuffer bb = java.nio.ByteBuffer.allocate(4 + 4 + 256 + 256 + 4)
                 .order(java.nio.ByteOrder.LITTLE_ENDIAN);
-        bb.putInt(64).putInt((int) n0inv).put(le(n, 256)).put(le(rr, 256)).putInt(k.getPublicExponent().intValue());
+        bb.putInt(64).putInt((int) n0inv).put(le(n, 256)).put(le(rr, 256)).putInt(65537);
         byte[] pub = Base64.encode(bb.array(), Base64.NO_WRAP);
         byte[] tail = " layarcctv@tv\0".getBytes();
         byte[] out = new byte[pub.length + tail.length];

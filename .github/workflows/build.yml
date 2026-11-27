@@ -6,6 +6,8 @@ on:
     paths-ignore:
       - 'RemoteTV/**'
       - '.github/workflows/remotetv.yml'
+      - 'RemoteHP/**'
+      - '.github/workflows/remotehp.yml'
   workflow_dispatch:
 
 permissions:

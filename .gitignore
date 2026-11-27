@@ -4,3 +4,9 @@ app/build/
 local.properties
 *.iml
 .idea/
+RemoteHP/.gradle/
+RemoteHP/build/
+RemoteHP/app/build/
+RemoteHP/gradle/
+RemoteHP/gradlew
+RemoteHP/gradlew.bat

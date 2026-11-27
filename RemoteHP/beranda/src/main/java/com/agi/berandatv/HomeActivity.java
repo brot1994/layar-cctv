@@ -64,6 +64,7 @@ public class HomeActivity extends Activity {
     private TextureView wallVideo;
     private MediaPlayer player;
     private File wallFile;
+    private float posX = 0.5f, posY = 0.5f;
     private long wallStamp = -1;
     private TextView clock, date;
     private LinearLayout favRow, allBox;
@@ -226,6 +227,7 @@ public class HomeActivity extends Activity {
         boolean changed = force || stamp != wallStamp;
         wallStamp = stamp;
         wallFile = f;
+        readPos(f);
         if (f != null && f.getName().endsWith(".mp4")) {
             if (changed) stopVideo();
             wallImg.setImageDrawable(null);
@@ -260,6 +262,17 @@ public class HomeActivity extends Activity {
         }).start();
     }
 
+    /** Posisi potong video (0..1) dari wall_pos.txt di folder yang sama. */
+    private void readPos(File f) {
+        posX = posY = 0.5f;
+        if (f == null) return;
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(new File(f.getParentFile(), "wall_pos.txt")))) {
+            String[] p = r.readLine().trim().split("\\s+");
+            posX = Math.max(0f, Math.min(1f, Float.parseFloat(p[0])));
+            posY = Math.max(0f, Math.min(1f, Float.parseFloat(p[1])));
+        } catch (Exception ignored) { }
+    }
+
     private void startVideo() {
         if (player != null || wallFile == null || !wallFile.getName().endsWith(".mp4") || !wallVideo.isAvailable()) return;
         try {
@@ -288,7 +301,8 @@ public class HomeActivity extends Activity {
         float scale = Math.max(w / vw, hh / vh);
         float sx = vw * scale / w, sy = vh * scale / hh;
         Matrix m = new Matrix();
-        m.setScale(sx, sy, w / 2f, hh / 2f);
+        m.setScale(sx, sy);
+        m.postTranslate(-(vw * scale - w) * posX, -(vh * scale - hh) * posY);
         wallVideo.setTransform(m);
     }
 

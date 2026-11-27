@@ -926,7 +926,7 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
         if (req == REQ_APK && res == RESULT_OK && data != null && data.getData() != null) setApk(data.getData());
-        if (req == REQ_WALL && res == RESULT_OK && data != null && data.getData() != null) sendWall(data.getData());
+        if (req == REQ_WALL && res == RESULT_OK && data != null && data.getData() != null) openWallEditor(data.getData());
     }
 
     private String[] nameSize(Uri u) {
@@ -1348,72 +1348,71 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void sendWall(Uri u) {
-        if (homeBusy) return;
-        homeStart();
+    private boolean isVideo(Uri u) {
+        String type = getContentResolver().getType(u);
+        return (type != null && type.startsWith("video")) || nameSize(u)[0].toLowerCase(Locale.US).endsWith(".mp4");
+    }
+
+    /** Buka layar atur posisi: bingkai 16:9 seperti TV, geser (dan cubit untuk foto). */
+    private void openWallEditor(Uri u) {
+        hlog("Membuka gambar…");
         bg.execute(() -> {
-            File tmp = null;
             try {
-                String type = getContentResolver().getType(u);
-                String[] ns = nameSize(u);
-                boolean video = (type != null && type.startsWith("video")) || ns[0].toLowerCase(Locale.US).endsWith(".mp4");
-                String ext = video ? "mp4" : "jpg";
-                tmp = new File(getCacheDir(), "wall." + ext);
-                if (video) {
-                    try (InputStream is = getContentResolver().openInputStream(u); FileOutputStream fo = new FileOutputStream(tmp)) {
-                        byte[] buf = new byte[65536];
-                        int n;
-                        while ((n = is.read(buf)) > 0) fo.write(buf, 0, n);
-                    }
-                    if (tmp.length() > 40L * 1048576) hlog("Catatan: video cukup besar (" + (tmp.length() / 1048576) + " MB). Video pendek lebih ringan untuk TV.");
-                } else {
-                    hlog("Menyiapkan foto…");
-                    makeWallJpeg(u, tmp);
-                }
-                AdbConn c = conn();
-                if (!c.shell("pm path " + HOME_PKG, 8000).contains("package:")) {
-                    hlog("Beranda TV belum terpasang. Tekan langkah 1 dulu.");
-                    return;
-                }
-                long size = tmp.length();
-                hlog(String.format(Locale.US, "Mengirim wallpaper (%.1f MB) …", size / 1048576f));
-                ui.post(() -> { homeBar.setProgress(0); homeBar.setVisibility(View.VISIBLE); });
-                AdbConn.Progress pr = (d, t) -> ui.post(() -> homeBar.setProgress((int) (d * 1000 / Math.max(1, t))));
-                String script = "mkdir -p files && head -c " + size + " > files/wall.tmp && rm -f files/wall.jpg files/wall.png files/wall.mp4"
-                        + " && mv files/wall.tmp files/wall." + ext + " && echo WALL_OK";
-                String out;
-                try (InputStream is = new FileInputStream(tmp)) {
-                    out = c.execWithInput("run-as " + HOME_PKG + " sh -c '" + script + "'", is, size, pr);
-                }
-                if (!out.contains("WALL_OK")) {
-                    hlog("Cara cepat tidak bisa (" + out.trim() + "), pakai cara cadangan…");
-                    c.shell("mkdir -p /sdcard/BerandaTV && rm -f /sdcard/BerandaTV/wall.*", 10000);
-                    try (InputStream is = new FileInputStream(tmp)) {
-                        c.push(is, size, "/sdcard/BerandaTV/wall." + ext, pr);
-                    }
-                    for (String perm : new String[]{"READ_EXTERNAL_STORAGE", "READ_MEDIA_IMAGES", "READ_MEDIA_VIDEO"})
-                        c.shell("pm grant " + HOME_PKG + " android.permission." + perm, 8000);
-                }
-                c.shell("am start -n " + HOME_CMP + " --ez reload true", 10000);
-                hlog("✔ Wallpaper terpasang di " + cur.label() + ".");
-            } catch (Exception e) {
+                boolean video = isVideo(u);
+                Bitmap b = video ? videoFrame(u) : loadPhoto(u);
+                ui.post(() -> { homeLog.setText(""); showWallEditor(u, b, video); });
+            } catch (Throwable e) {
                 hlog("✖ " + e.getMessage());
-            } finally {
-                if (tmp != null) //noinspection ResultOfMethodCallIgnored
-                    tmp.delete();
-                homeBusy = false;
             }
         });
     }
 
-    /** Perkecil foto ke maks. 1920×1080 (dengan rotasi EXIF) lalu simpan JPEG. */
-    private void makeWallJpeg(Uri u, File out) throws Exception {
+    private void showWallEditor(Uri u, Bitmap b, boolean video) {
+        LinearLayout box = vbox();
+        box.setPadding(dp(16), dp(8), dp(16), 0);
+        TextView hint = label(video
+                ? "Geser gambar untuk mengatur bagian video yang tampil di TV."
+                : "Geser foto untuk mengatur posisi. Cubit dengan dua jari untuk zoom.", 14, 0xFF444444, false);
+        hint.setPadding(0, 0, 0, dp(10));
+        box.addView(hint);
+        WallCropView cv = new WallCropView(this, b, !video);
+        box.addView(cv, new LinearLayout.LayoutParams(-1, -2));
+        new AlertDialog.Builder(this)
+                .setTitle("Atur posisi wallpaper")
+                .setView(box)
+                .setPositiveButton("Kirim ke TV", (d, w) -> {
+                    if (video) {
+                        float[] p = cv.pos();
+                        sendWall(u, null, null, p[0], p[1]);
+                    } else {
+                        android.graphics.RectF r = cv.crop();
+                        sendWall(u, b, r, 0.5f, 0.5f);
+                    }
+                })
+                .setNegativeButton("Batal", null)
+                .show();
+    }
+
+    private Bitmap videoFrame(Uri u) throws Exception {
+        android.media.MediaMetadataRetriever r = new android.media.MediaMetadataRetriever();
+        try {
+            r.setDataSource(this, u);
+            Bitmap f = r.getFrameAtTime(0);
+            if (f == null) throw new Exception("Video tidak terbaca.");
+            return f;
+        } finally {
+            try { r.release(); } catch (Exception ignored) { }
+        }
+    }
+
+    /** Foto (dengan rotasi EXIF), cukup besar untuk dipotong ke 1920×1080. */
+    private Bitmap loadPhoto(Uri u) throws Exception {
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inJustDecodeBounds = true;
         try (InputStream is = getContentResolver().openInputStream(u)) { BitmapFactory.decodeStream(is, null, o); }
         if (o.outWidth <= 0) throw new Exception("File gambar tidak terbaca.");
         int s = 1;
-        while (o.outWidth / (s * 2) >= 1920 || o.outHeight / (s * 2) >= 1920) s *= 2;
+        while (Math.min(o.outWidth, o.outHeight) / (s * 2) >= 1440) s *= 2;
         BitmapFactory.Options o2 = new BitmapFactory.Options();
         o2.inSampleSize = s;
         Bitmap b;
@@ -1427,12 +1426,80 @@ public class MainActivity extends Activity {
                 rot = or == 6 ? 90 : or == 3 ? 180 : or == 8 ? 270 : 0;
             } catch (Exception ignored) { }
         }
-        float sc = Math.min(1f, 1920f / Math.max(b.getWidth(), b.getHeight()));
+        if (rot == 0) return b;
         Matrix m = new Matrix();
-        m.postScale(sc, sc);
-        if (rot != 0) m.postRotate(rot);
+        m.postRotate(rot);
         Bitmap r = Bitmap.createBitmap(b, 0, 0, b.getWidth(), b.getHeight(), m, true);
-        try (FileOutputStream fo = new FileOutputStream(out)) { r.compress(Bitmap.CompressFormat.JPEG, 90, fo); }
+        if (r != b) b.recycle();
+        return r;
+    }
+
+    /** Potong bagian yang dipilih lalu jadikan JPEG 1920×1080. */
+    private void writeCropJpeg(Bitmap src, android.graphics.RectF r, File out) throws Exception {
+        int l = Math.max(0, Math.round(r.left)), t = Math.max(0, Math.round(r.top));
+        int w = Math.min(src.getWidth() - l, Math.round(r.width())), h = Math.min(src.getHeight() - t, Math.round(r.height()));
+        Bitmap c = Bitmap.createBitmap(src, l, t, Math.max(1, w), Math.max(1, h));
+        Bitmap o = Bitmap.createScaledBitmap(c, 1920, 1080, true);
+        try (FileOutputStream fo = new FileOutputStream(out)) { o.compress(Bitmap.CompressFormat.JPEG, 92, fo); }
+    }
+
+    private void sendWall(Uri u, Bitmap photo, android.graphics.RectF photoCrop, float px, float py) {
+        if (homeBusy) return;
+        homeStart();
+        bg.execute(() -> {
+            File tmp = null;
+            try {
+                boolean video = photoCrop == null;
+                String ext = video ? "mp4" : "jpg";
+                tmp = new File(getCacheDir(), "wall." + ext);
+                if (video) {
+                    try (InputStream is = getContentResolver().openInputStream(u); FileOutputStream fo = new FileOutputStream(tmp)) {
+                        byte[] buf = new byte[65536];
+                        int n;
+                        while ((n = is.read(buf)) > 0) fo.write(buf, 0, n);
+                    }
+                    if (tmp.length() > 40L * 1048576) hlog("Catatan: video cukup besar (" + (tmp.length() / 1048576) + " MB). Video pendek lebih ringan untuk TV.");
+                } else {
+                    hlog("Menyiapkan foto…");
+                    writeCropJpeg(photo, photoCrop, tmp);
+                }
+                AdbConn c = conn();
+                if (!c.shell("pm path " + HOME_PKG, 8000).contains("package:")) {
+                    hlog("Beranda TV belum terpasang. Tekan langkah 1 dulu.");
+                    return;
+                }
+                long size = tmp.length();
+                String posTxt = String.format(Locale.US, "%.4f %.4f", px, py);
+                hlog(String.format(Locale.US, "Mengirim wallpaper (%.1f MB) …", size / 1048576f));
+                ui.post(() -> { homeBar.setProgress(0); homeBar.setVisibility(View.VISIBLE); });
+                AdbConn.Progress pr = (d, t) -> ui.post(() -> homeBar.setProgress((int) (d * 1000 / Math.max(1, t))));
+                String script = "mkdir -p files && head -c " + size + " > files/wall.tmp && rm -f files/wall.jpg files/wall.png files/wall.mp4"
+                        + " && echo " + posTxt + " > files/wall_pos.txt"
+                        + " && mv files/wall.tmp files/wall." + ext + " && echo WALL_OK";
+                String out;
+                try (InputStream is = new FileInputStream(tmp)) {
+                    out = c.execWithInput("run-as " + HOME_PKG + " sh -c '" + script + "'", is, size, pr);
+                }
+                if (!out.contains("WALL_OK")) {
+                    hlog("Cara cepat tidak bisa (" + out.trim() + "), pakai cara cadangan…");
+                    c.shell("mkdir -p /sdcard/BerandaTV && rm -f /sdcard/BerandaTV/wall.*", 10000);
+                    c.shell("echo " + posTxt + " > /sdcard/BerandaTV/wall_pos.txt", 10000);
+                    try (InputStream is = new FileInputStream(tmp)) {
+                        c.push(is, size, "/sdcard/BerandaTV/wall." + ext, pr);
+                    }
+                    for (String perm : new String[]{"READ_EXTERNAL_STORAGE", "READ_MEDIA_IMAGES", "READ_MEDIA_VIDEO"})
+                        c.shell("pm grant " + HOME_PKG + " android.permission." + perm, 8000);
+                }
+                c.shell("am start -n " + HOME_CMP + " --ez reload true", 10000);
+                hlog("✔ Wallpaper terpasang di " + cur.label() + ".");
+            } catch (Throwable e) {
+                hlog("✖ " + e.getMessage());
+            } finally {
+                if (tmp != null) //noinspection ResultOfMethodCallIgnored
+                    tmp.delete();
+                homeBusy = false;
+            }
+        });
     }
 
     @Override
